@@ -20,7 +20,7 @@ class SplashPage extends StatelessWidget {
             children: [
               const SizedBox(height: 40),
               Text(
-                'KonkourCI',
+                'MegaPromo',
                 style: AppTextStyles.displayLarge.copyWith(
                   color: AppColors.primary,
                 ),

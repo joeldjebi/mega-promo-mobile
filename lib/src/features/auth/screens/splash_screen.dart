@@ -45,16 +45,24 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-                  width: 112,
-                  height: 112,
+                  width: 132,
+                  height: 132,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primary,
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(34),
+                    border: Border.all(color: AppColors.surfaceBorder),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.18),
+                        blurRadius: 34,
+                        offset: const Offset(0, 18),
+                      ),
+                    ],
                   ),
-                  child: const Icon(
-                    Icons.emoji_events_rounded,
-                    color: AppColors.gold,
-                    size: 56,
+                  child: Image.asset(
+                    'assets/logo/megapromologo.png',
+                    fit: BoxFit.contain,
                   ),
                 )
                 .animate()
@@ -65,8 +73,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                   duration: 650.ms,
                   curve: Curves.easeOutBack,
                 ),
-            const SizedBox(height: 28),
-            Text('MegaPromo', style: AppTextStyles.h1),
             const SizedBox(height: 8),
             Text('Joue. Gagne. Vis.', style: AppTextStyles.bodySecondary),
           ],

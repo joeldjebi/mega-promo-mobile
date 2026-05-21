@@ -9,12 +9,14 @@ import 'core/theme/app_theme.dart';
 import 'src/config/supabase_config.dart';
 import 'src/config/router.dart';
 import 'src/features/auth/providers/auth_provider.dart';
+import 'src/services/device_telemetry_service.dart';
 import 'src/services/fcm_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final firebaseReady = await _initializeFirebase();
   await Supabase.initialize(url: kSupabaseUrl, anonKey: kSupabaseAnonKey);
+  DeviceTelemetryService.initialize();
   if (firebaseReady) {
     unawaited(FcmService.initialize());
   }
@@ -44,10 +46,11 @@ class KonkourApp extends ConsumerWidget {
 
     ref.listen(authStateProvider, (previous, next) {
       unawaited(FcmService.syncTokenForCurrentUser());
+      unawaited(DeviceTelemetryService.syncForCurrentUser(force: true));
     });
 
     return MaterialApp.router(
-      title: 'KonkourCI',
+      title: 'MegaPromo',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       routerConfig: router,

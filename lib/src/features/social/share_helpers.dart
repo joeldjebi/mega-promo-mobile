@@ -40,7 +40,7 @@ Gagne *${contest.prizeValue.round()} FCFA* sur MegaPromo !
 Il reste ${formatRemainingText(contest.endsAt)}
 $participantsCount joueurs participent déjà
 
-Joue maintenant : https://konkourci.com/c/${contest.id}''';
+Joue maintenant : https://MegaPromo.com/c/${contest.id}''';
 
   await SharePlus.instance.share(ShareParams(text: text));
 }
@@ -57,7 +57,7 @@ $contestTitle
 
 J’ai fait *$correctAnswers / $totalQuestions* et gagné *$points points* !
 
-Joue maintenant : https://konkourci.com''';
+Joue maintenant : https://MegaPromo.com''';
 
   await SharePlus.instance.share(ShareParams(text: text));
 }

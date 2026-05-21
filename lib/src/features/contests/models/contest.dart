@@ -74,6 +74,7 @@ class Contest {
   final bool isBoosted;
   final int viewsCount;
   final int sharesCount;
+  final List<String> allowedPlayerPlanKeys;
 
   const Contest({
     required this.id,
@@ -95,6 +96,7 @@ class Contest {
     required this.isBoosted,
     required this.viewsCount,
     required this.sharesCount,
+    required this.allowedPlayerPlanKeys,
   });
 
   factory Contest.fromJson(Map<String, dynamic> json) {
@@ -119,6 +121,7 @@ class Contest {
       isBoosted: json['is_boosted'] as bool? ?? false,
       viewsCount: (json['views_count'] as num?)?.toInt() ?? 0,
       sharesCount: (json['shares_count'] as num?)?.toInt() ?? 0,
+      allowedPlayerPlanKeys: _allowedPlanKeys(json['allowed_player_plan_keys']),
     );
   }
 
@@ -143,6 +146,7 @@ class Contest {
       isBoosted: isBoosted,
       viewsCount: viewsCount,
       sharesCount: sharesCount,
+      allowedPlayerPlanKeys: allowedPlayerPlanKeys,
     );
   }
 
@@ -167,8 +171,40 @@ class Contest {
       isBoosted: isBoosted,
       viewsCount: viewsCount,
       sharesCount: sharesCount,
+      allowedPlayerPlanKeys: allowedPlayerPlanKeys,
     );
   }
+
+  bool isAccessibleForPlan(String planKey) {
+    if (allowedPlayerPlanKeys.isEmpty) return true;
+    final normalizedPlanKey = planKey == 'standard' ? 'free' : planKey;
+    return allowedPlayerPlanKeys.contains(normalizedPlanKey);
+  }
+
+  String get accessLabel {
+    if (allowedPlayerPlanKeys.isEmpty) return 'Tous les joueurs';
+    return allowedPlayerPlanKeys
+        .map((key) {
+          return switch (key) {
+            'free' => 'Standard',
+            'premium' => 'Premium',
+            'vip' => 'VIP',
+            _ => key,
+          };
+        })
+        .join(' + ');
+  }
+}
+
+List<String> _allowedPlanKeys(Object? value) {
+  if (value is! List) return const [];
+  final keys = <String>{};
+  for (final item in value) {
+    if (item == 'standard' || item == 'free') keys.add('free');
+    if (item == 'premium') keys.add('premium');
+    if (item == 'vip') keys.add('vip');
+  }
+  return keys.toList(growable: false);
 }
 
 String _categoryName(Map<String, dynamic> json) {

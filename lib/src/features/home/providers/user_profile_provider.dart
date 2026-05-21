@@ -12,6 +12,7 @@ class UserProfile {
   final int pointsTotal;
   final int participationsToday;
   final String planName;
+  final String planKey;
   final int dailyParticipationLimit;
   final int bonusTickets;
   final double badgeMultiplier;
@@ -25,6 +26,7 @@ class UserProfile {
     required this.pointsTotal,
     required this.participationsToday,
     required this.planName,
+    required this.planKey,
     required this.dailyParticipationLimit,
     required this.bonusTickets,
     required this.badgeMultiplier,
@@ -51,6 +53,7 @@ class UserProfile {
           ? (json['participations_today'] as num?)?.toInt() ?? 0
           : 0,
       planName: plan?['name'] as String? ?? 'Standard',
+      planKey: planKey,
       dailyParticipationLimit:
           (plan?['daily_participation_limit'] as num?)?.toInt() ?? 3,
       bonusTickets: (plan?['bonus_tickets'] as num?)?.toInt() ?? 0,
@@ -70,7 +73,9 @@ bool _isToday(String? value) {
   final date = DateTime.tryParse(value);
   if (date == null) return false;
   final now = DateTime.now();
-  return date.year == now.year && date.month == now.month && date.day == now.day;
+  return date.year == now.year &&
+      date.month == now.month &&
+      date.day == now.day;
 }
 
 Future<UserProfile> fetchCurrentUserProfile(Ref ref) async {
@@ -113,6 +118,8 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref) async {
   return UserProfile.fromJson(data, activeSubscription: activeSubscription);
 }
 
-final userProfileProvider = FutureProvider.autoDispose<UserProfile>((ref) async {
+final userProfileProvider = FutureProvider.autoDispose<UserProfile>((
+  ref,
+) async {
   return fetchCurrentUserProfile(ref);
 });

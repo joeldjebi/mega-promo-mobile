@@ -1,9 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class MainShell extends StatelessWidget {
+import '../../auth/providers/auth_provider.dart';
+import '../../contests/providers/contest_providers.dart';
+import '../../home/providers/user_profile_provider.dart';
+import '../../notifications/providers/notifications_provider.dart';
+import '../../profile/providers/profile_provider.dart';
+import '../../rewards/providers/rewards_provider.dart';
+import '../../subscriptions/providers/player_subscription_provider.dart';
+
+class MainShell extends ConsumerStatefulWidget {
   final Widget child;
 
   const MainShell({super.key, required this.child});
@@ -17,12 +29,124 @@ class MainShell extends StatelessWidget {
   ];
 
   @override
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends ConsumerState<MainShell> {
+  RealtimeChannel? _maintenanceChannel;
+  String? _currentUserId;
+
+  @override
   Widget build(BuildContext context) {
+    final authUser = ref.watch(authStateProvider).value;
+    _syncMaintenanceRealtime(authUser?.id);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: child,
+      body: widget.child,
       bottomNavigationBar: const _MainBottomNav(),
     );
+  }
+
+  void _syncMaintenanceRealtime(String? userId) {
+    if (_currentUserId == userId) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _currentUserId == userId) return;
+      _subscribeMaintenanceRealtime(userId);
+    });
+  }
+
+  void _subscribeMaintenanceRealtime(String? userId) {
+    final supabase = ref.read(supabaseProvider);
+    final previousChannel = _maintenanceChannel;
+    if (previousChannel != null) {
+      unawaited(supabase.removeChannel(previousChannel));
+    }
+
+    _maintenanceChannel = null;
+    _currentUserId = userId;
+    if (userId == null) return;
+
+    void refreshAll(PostgresChangePayload payload) {
+      clearAllContestDetailCache();
+      ref
+        ..invalidate(userProfileProvider)
+        ..invalidate(profileDataProvider)
+        ..invalidate(rewardsProvider)
+        ..invalidate(playerPlansProvider)
+        ..invalidate(contestsProvider)
+        ..invalidate(contestParticipantsCountProvider)
+        ..invalidate(contestDetailProvider)
+        ..invalidate(notificationsProvider);
+    }
+
+    _maintenanceChannel = supabase
+        .channel('mobile-maintenance-refresh-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'users',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: userId,
+          ),
+          callback: refreshAll,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'participations',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshAll,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'winners',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshAll,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'user_badges',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshAll,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'player_subscriptions',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshAll,
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    final channel = _maintenanceChannel;
+    if (channel != null) {
+      unawaited(Supabase.instance.client.removeChannel(channel));
+    }
+    super.dispose();
   }
 }
 

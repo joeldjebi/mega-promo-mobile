@@ -24,10 +24,12 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
 
 final contestsProvider = StreamProvider<List<Contest>>((ref) {
   final supabase = ref.watch(supabaseProvider);
+  final userPlanKey = ref.watch(userProfileProvider).value?.planKey ?? 'free';
   authLogPayload('contestsStream', {
     'table': 'contests',
     'filter': {'status': 'active'},
     'order': 'starts_at asc',
+    'playerPlan': userPlanKey,
   });
 
   final stream = supabase
@@ -41,6 +43,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) {
         final contests = rows
             .map(Contest.fromJson)
             .where((contest) => contest.endsAt.isAfter(now))
+            .where((contest) => contest.isAccessibleForPlan(userPlanKey))
             .toList();
         contests.sort((a, b) {
           final boostCompare = b.isBoosted.toString().compareTo(
@@ -80,10 +83,7 @@ int nextContestShuffleSeed([String? userId]) {
   return DateTime.now().microsecondsSinceEpoch ^ userHash;
 }
 
-List<Contest> shuffleContestsForSession(
-  Iterable<Contest> contests,
-  int seed,
-) {
+List<Contest> shuffleContestsForSession(Iterable<Contest> contests, int seed) {
   final shuffled = contests.toList()
     ..sort((first, second) {
       final firstRank = _stableContestRank(first.id, seed);
@@ -103,16 +103,16 @@ int _stableContestRank(String value, int seed) {
   return hash;
 }
 
-final contestParticipantsCountProvider =
-    FutureProvider.autoDispose.family<int, String>((ref, contestId) async {
-  final supabase = ref.watch(supabaseProvider);
-  final participants = await supabase
-      .from('participations')
-      .select('id')
-      .eq('contest_id', contestId);
+final contestParticipantsCountProvider = FutureProvider.autoDispose
+    .family<int, String>((ref, contestId) async {
+      final supabase = ref.watch(supabaseProvider);
+      final participants = await supabase
+          .from('participations')
+          .select('id')
+          .eq('contest_id', contestId);
 
-  return participants.length;
-});
+      return participants.length;
+    });
 
 class ContestDetailData {
   final Contest contest;
@@ -192,7 +192,8 @@ class ContestDrawSettings {
     return ContestDrawSettings(
       standardTickets: (json['standard_tickets'] as num?)?.toInt() ?? 1,
       premiumTickets: (json['premium_tickets'] as num?)?.toInt() ?? 2,
-      confirmationMessage: json['confirmation_message'] as String? ??
+      confirmationMessage:
+          json['confirmation_message'] as String? ??
           'Tu participes ! Les gagnants seront annoncés bientôt.',
       winnerAnnouncementAt: DateTime.tryParse(
         json['winner_announcement_at'] as String? ?? '',
@@ -210,6 +211,10 @@ String _contestDetailCacheKey(String userId, String contestId) {
 
 void clearContestDetailCache(String contestId) {
   _contestDetailCache.removeWhere((key, _) => key.endsWith('::$contestId'));
+}
+
+void clearAllContestDetailCache() {
+  _contestDetailCache.clear();
 }
 
 final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((

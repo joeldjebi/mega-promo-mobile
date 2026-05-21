@@ -51,7 +51,11 @@ class _ContestDetailBody extends ConsumerWidget {
       data.userProfile.participationsToday >=
       data.userProfile.dailyParticipationLimit;
 
+  bool get _planAccessDenied =>
+      !data.contest.isAccessibleForPlan(data.userProfile.planKey);
+
   String get _buttonText {
+    if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
     if (data.hasParticipated) return 'Déjà participé · Actualiser';
     if (_dailyLimitReached) {
       return 'Limite ${data.userProfile.dailyParticipationLimit}/jour atteinte';
@@ -80,6 +84,17 @@ class _ContestDetailBody extends ConsumerWidget {
   }
 
   Future<void> _participate(BuildContext context, WidgetRef ref) async {
+    if (_planAccessDenied) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Ce concours est réservé aux joueurs ${data.contest.accessLabel}.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (data.contest.type == ContestType.quiz) {
       context.go('/contests/${data.contest.id}/quiz');
       return;
@@ -93,10 +108,8 @@ class _ContestDetailBody extends ConsumerWidget {
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        builder: (context) => _PredictionParticipationSheet(
-          data: data,
-          ref: ref,
-        ),
+        builder: (context) =>
+            _PredictionParticipationSheet(data: data, ref: ref),
       );
       return;
     }
@@ -195,6 +208,25 @@ class _ContestDetailBody extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  if (_planAccessDenied) ...[
+                    const SizedBox(height: 14),
+                    AppCard(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.lock_rounded, color: AppColors.gold),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Ce concours est réservé aux joueurs ${contest.accessLabel}. Ton forfait actuel est ${data.userProfile.planName}.',
+                              style: AppTextStyles.bodySecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 26),
                   Text('Description', style: AppTextStyles.h2),
                   const SizedBox(height: 10),
@@ -224,7 +256,7 @@ class _ContestDetailBody extends ConsumerWidget {
             top: false,
             child: AppButton(
               text: _buttonText,
-              onPressed: _dailyLimitReached
+              onPressed: _planAccessDenied || _dailyLimitReached
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
@@ -265,10 +297,7 @@ class _DrawParticipationSheetState
         'user_id': user.id,
         'contest_id': widget.data.contest.id,
         'score': 0,
-        'answers': {
-          'type': widget.data.contest.type.name,
-          'tickets': tickets,
-        },
+        'answers': {'type': widget.data.contest.type.name, 'tickets': tickets},
         'completed': true,
       });
 
@@ -402,10 +431,7 @@ class _PredictionParticipationSheet extends ConsumerStatefulWidget {
   final ContestDetailData data;
   final WidgetRef ref;
 
-  const _PredictionParticipationSheet({
-    required this.data,
-    required this.ref,
-  });
+  const _PredictionParticipationSheet({required this.data, required this.ref});
 
   @override
   ConsumerState<_PredictionParticipationSheet> createState() =>
@@ -433,22 +459,27 @@ class _PredictionParticipationSheetState
 
     if (prediction == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ce pronostic n’est pas encore configuré.')),
+        const SnackBar(
+          content: Text('Ce pronostic n’est pas encore configuré.'),
+        ),
       );
       return;
     }
 
     if (!prediction.isOpen) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ce pronostic est fermé.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Ce pronostic est fermé.')));
       return;
     }
 
-    if (homeScore == null || awayScore == null || homeScore < 0 || awayScore < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Entre un score valide.')),
-      );
+    if (homeScore == null ||
+        awayScore == null ||
+        homeScore < 0 ||
+        awayScore < 0) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Entre un score valide.')));
       return;
     }
 
@@ -622,8 +653,8 @@ class _PredictionParticipationSheetState
                 Text(
                   isConfigured
                       ? isOpen
-                          ? 'Score exact : ${prediction.pointsExactScore} pts · Bon résultat : ${prediction.pointsCorrectResult} pts'
-                          : 'Ce pronostic est actuellement fermé.'
+                            ? 'Score exact : ${prediction.pointsExactScore} pts · Bon résultat : ${prediction.pointsCorrectResult} pts'
+                            : 'Ce pronostic est actuellement fermé.'
                       : 'Ce jeu n’est pas encore configuré par MegaPromo.',
                   textAlign: TextAlign.center,
                   style: AppTextStyles.bodySmall,
@@ -712,14 +743,12 @@ class _NetworkPromoImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxImageWidth = (constraints.maxWidth * 0.5).clamp(
-          104.0,
-          180.0,
-        ).toDouble();
-        final maxImageHeight = (constraints.maxHeight * 0.56).clamp(
-          60.0,
-          94.0,
-        ).toDouble();
+        final maxImageWidth = (constraints.maxWidth * 0.5)
+            .clamp(104.0, 180.0)
+            .toDouble();
+        final maxImageHeight = (constraints.maxHeight * 0.56)
+            .clamp(60.0, 94.0)
+            .toDouble();
 
         return Center(
           child: Container(

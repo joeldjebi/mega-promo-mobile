@@ -8,6 +8,7 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 
+import '../../contests/providers/contest_providers.dart';
 import '../models/question.dart';
 import '../providers/quiz_providers.dart';
 
@@ -19,6 +20,21 @@ class QuizScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final questions = ref.watch(quizQuestionsProvider(contestId));
+    final detail = ref.watch(contestDetailProvider(contestId));
+    final detailData = detail.value;
+
+    if (detailData != null &&
+        !detailData.contest.isAccessibleForPlan(
+          detailData.userProfile.planKey,
+        )) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: _QuizAccessDenied(
+          label: detailData.contest.accessLabel,
+          onBack: () => context.go('/contests/$contestId'),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -28,6 +44,40 @@ class QuizScreen extends ConsumerWidget {
             : _QuizRunner(contestId: contestId, questions: items),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stackTrace) => const _EmptyQuiz(),
+      ),
+    );
+  }
+}
+
+class _QuizAccessDenied extends StatelessWidget {
+  final String label;
+  final VoidCallback onBack;
+
+  const _QuizAccessDenied({required this.label, required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: AppCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_rounded, color: AppColors.gold, size: 42),
+              const SizedBox(height: 14),
+              Text('Concours réservé', style: AppTextStyles.h2),
+              const SizedBox(height: 8),
+              Text(
+                'Ce quiz est accessible uniquement aux joueurs $label.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySecondary,
+              ),
+              const SizedBox(height: 20),
+              AppButton(text: 'Retour au concours', onPressed: onBack),
+            ],
+          ),
+        ),
       ),
     );
   }
