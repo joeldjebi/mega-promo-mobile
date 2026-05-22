@@ -1,0 +1,85 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+class LiveQuizNotificationService {
+  LiveQuizNotificationService._();
+
+  static final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+  static bool _initialized = false;
+
+  static Future<void> initialize() async {
+    if (_initialized) return;
+
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
+    const iosSettings = DarwinInitializationSettings();
+    const settings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
+    try {
+      await _notifications.initialize(settings);
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestNotificationsPermission();
+      _initialized = true;
+    } catch (error, stackTrace) {
+      debugPrint('[LiveQuizNotification] init failed: $error');
+      debugPrint('$stackTrace');
+    }
+  }
+
+  static Future<void> showWaitingNotification({
+    required String contestId,
+    required String title,
+    required DateTime startsAt,
+  }) async {
+    await initialize();
+    if (!_initialized) return;
+
+    final time =
+        '${startsAt.hour.toString().padLeft(2, '0')}:'
+        '${startsAt.minute.toString().padLeft(2, '0')}';
+
+    const androidDetails = AndroidNotificationDetails(
+      'live_quiz_waiting',
+      'Quiz Live',
+      channelDescription: 'Salle d’attente et rappels Quiz Live MegaPromo',
+      importance: Importance.max,
+      priority: Priority.high,
+      ongoing: true,
+      autoCancel: false,
+      showWhen: true,
+      category: AndroidNotificationCategory.event,
+      visibility: NotificationVisibility.public,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    );
+
+    await _notifications.show(
+      _notificationId(contestId),
+      'Quiz Live en attente',
+      '$title démarre à $time. Reste prêt, le jeu se lance automatiquement.',
+      const NotificationDetails(android: androidDetails, iOS: iosDetails),
+      payload: contestId,
+    );
+  }
+
+  static Future<void> cancelWaitingNotification(String contestId) async {
+    if (!_initialized) return;
+    await _notifications.cancel(_notificationId(contestId));
+  }
+
+  static int _notificationId(String contestId) {
+    return contestId.hashCode & 0x7fffffff;
+  }
+}

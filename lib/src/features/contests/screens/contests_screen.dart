@@ -27,6 +27,8 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
   @override
   Widget build(BuildContext context) {
     final contests = ref.watch(contestsProvider);
+    final participatedContestIds =
+        ref.watch(userParticipatedContestIdsProvider).value ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
 
     return Scaffold(
@@ -51,6 +53,7 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
         top: false,
         child: RefreshIndicator(
           onRefresh: () async {
+            ref.invalidate(userParticipatedContestIdsProvider);
             ref.read(contestsShuffleSeedProvider.notifier).refresh();
             final refreshed = ref.refresh(contestsProvider.future);
             await refreshed;
@@ -85,18 +88,23 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
                     _CategoryFilters(
                       categories: categories,
                       selectedCategory: _selectedCategory,
-                      onSelected: (category) => setState(
-                        () => _selectedCategory = category,
-                      ),
+                      onSelected: (category) =>
+                          setState(() => _selectedCategory = category),
                     ),
                   ],
                   const SizedBox(height: 16),
                   if (filtered.isEmpty)
                     const _EmptyContestList()
                   else if (_viewMode == _ContestViewMode.grid)
-                    _ContestGrid(contests: filtered)
+                    _ContestGrid(
+                      contests: filtered,
+                      participatedContestIds: participatedContestIds,
+                    )
                   else
-                    _ContestList(contests: filtered),
+                    _ContestList(
+                      contests: filtered,
+                      participatedContestIds: participatedContestIds,
+                    ),
                 ],
               );
             },
@@ -112,7 +120,8 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
 
   List<Contest> _filterContests(List<Contest> contests) {
     return contests.where((contest) {
-      final typeMatches = _selectedType == null || contest.type == _selectedType;
+      final typeMatches =
+          _selectedType == null || contest.type == _selectedType;
       final categoryMatches =
           _selectedCategory == null || contest.category == _selectedCategory;
       return typeMatches && categoryMatches;
@@ -120,12 +129,13 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
   }
 
   List<String> _categoryNames(List<Contest> contests) {
-    final names = contests
-        .map((contest) => contest.category.trim())
-        .where((category) => category.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final names =
+        contests
+            .map((contest) => contest.category.trim())
+            .where((category) => category.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     return names;
   }
 }
@@ -247,7 +257,9 @@ class _FilterChipButton extends StatelessWidget {
           color: isSelected ? AppColors.primary : AppColors.surface,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: isSelected ? AppColors.primaryLight : AppColors.surfaceBorder,
+            color: isSelected
+                ? AppColors.primaryLight
+                : AppColors.surfaceBorder,
           ),
         ),
         alignment: Alignment.center,
@@ -267,8 +279,12 @@ class _FilterChipButton extends StatelessWidget {
 
 class _ContestList extends StatelessWidget {
   final List<Contest> contests;
+  final Set<String> participatedContestIds;
 
-  const _ContestList({required this.contests});
+  const _ContestList({
+    required this.contests,
+    required this.participatedContestIds,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -277,7 +293,10 @@ class _ContestList extends StatelessWidget {
           .map(
             (contest) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: _ListContestCard(contest: contest),
+              child: _ListContestCard(
+                contest: contest,
+                hasParticipated: participatedContestIds.contains(contest.id),
+              ),
             ),
           )
           .toList(),
@@ -287,8 +306,12 @@ class _ContestList extends StatelessWidget {
 
 class _ContestGrid extends StatelessWidget {
   final List<Contest> contests;
+  final Set<String> participatedContestIds;
 
-  const _ContestGrid({required this.contests});
+  const _ContestGrid({
+    required this.contests,
+    required this.participatedContestIds,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -302,15 +325,22 @@ class _ContestGrid extends StatelessWidget {
         mainAxisSpacing: 10,
         childAspectRatio: 0.78,
       ),
-      itemBuilder: (context, index) => _GridContestCard(contest: contests[index]),
+      itemBuilder: (context, index) => _GridContestCard(
+        contest: contests[index],
+        hasParticipated: participatedContestIds.contains(contests[index].id),
+      ),
     );
   }
 }
 
 class _ListContestCard extends StatelessWidget {
   final Contest contest;
+  final bool hasParticipated;
 
-  const _ListContestCard({required this.contest});
+  const _ListContestCard({
+    required this.contest,
+    required this.hasParticipated,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -340,7 +370,10 @@ class _ListContestCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    _SmallBadge(label: contest.type.filterLabel),
+                    if (hasParticipated)
+                      const _ParticipatedBadge()
+                    else
+                      _SmallBadge(label: contest.type.filterLabel),
                     const SizedBox(width: 8),
                     _InlineMeta(
                       icon: Icons.visibility_rounded,
@@ -361,8 +394,12 @@ class _ListContestCard extends StatelessWidget {
 
 class _GridContestCard extends StatelessWidget {
   final Contest contest;
+  final bool hasParticipated;
 
-  const _GridContestCard({required this.contest});
+  const _GridContestCard({
+    required this.contest,
+    required this.hasParticipated,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -377,11 +414,10 @@ class _GridContestCard extends StatelessWidget {
             children: [
               _ContestIcon(contest: contest, size: 40),
               const Spacer(),
-              Icon(
-                contest.type.icon,
-                size: 17,
-                color: contest.type.color,
-              ),
+              if (hasParticipated)
+                const _ParticipatedBadge(compact: true)
+              else
+                Icon(contest.type.icon, size: 17, color: contest.type.color),
             ],
           ),
           const SizedBox(height: 12),
@@ -404,7 +440,10 @@ class _GridContestCard extends StatelessWidget {
             label: '${contest.viewsCount} vues',
           ),
           const Spacer(),
-          _SmallBadge(label: contest.type.filterLabel),
+          if (hasParticipated)
+            const _ParticipatedBadge()
+          else
+            _SmallBadge(label: contest.type.filterLabel),
           const SizedBox(height: 8),
           ContestTimer(
             endsAt: contest.endsAt,
@@ -439,7 +478,11 @@ class _ContestIcon extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: logoUrl?.isNotEmpty == true
           ? _NetworkLogo(url: logoUrl!)
-          : Icon(contest.type.icon, color: contest.type.color, size: size * 0.5),
+          : Icon(
+              contest.type.icon,
+              color: contest.type.color,
+              size: size * 0.5,
+            ),
     );
   }
 }
@@ -490,6 +533,51 @@ class _SmallBadge extends StatelessWidget {
           color: AppColors.primary,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+class _ParticipatedBadge extends StatelessWidget {
+  final bool compact;
+
+  const _ParticipatedBadge({this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 7,
+        vertical: compact ? 3 : 4,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.accentGreen.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: AppColors.accentGreen.withValues(alpha: 0.32),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            color: AppColors.accentGreen,
+            size: compact ? 10 : 11,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Déjà joué',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              fontSize: compact ? 9.5 : 10.5,
+              color: AppColors.accentGreen,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

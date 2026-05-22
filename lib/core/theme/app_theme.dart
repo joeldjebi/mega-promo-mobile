@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
 
 class AppTheme {
@@ -15,13 +14,12 @@ class AppTheme {
         surface: AppColors.surface,
         error: AppColors.accentRed,
       ),
-      textTheme: GoogleFonts.montserratTextTheme(ThemeData.light().textTheme),
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.background,
         elevation: 0,
         centerTitle: true,
         systemOverlayStyle: SystemUiOverlayStyle.dark,
-        titleTextStyle: GoogleFonts.montserrat(
+        titleTextStyle: const TextStyle(
           color: AppColors.textPrimary,
           fontSize: 17,
           fontWeight: FontWeight.w700,
@@ -29,17 +27,17 @@ class AppTheme {
         ),
         iconTheme: const IconThemeData(color: AppColors.textPrimary, size: 22),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: AppColors.surface,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textHint,
         type: BottomNavigationBarType.fixed,
         elevation: 0,
-        selectedLabelStyle: TextStyle(
+        selectedLabelStyle: const TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
-        unselectedLabelStyle: TextStyle(
+        unselectedLabelStyle: const TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w400,
         ),
@@ -76,7 +74,10 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
-        hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 14),
+        hintStyle: const TextStyle(
+          color: AppColors.textHint,
+          fontSize: 14,
+        ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 20,
           vertical: 18,

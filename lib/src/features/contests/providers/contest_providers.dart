@@ -27,7 +27,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) {
   final userPlanKey = ref.watch(userProfileProvider).value?.planKey ?? 'free';
   authLogPayload('contestsStream', {
     'table': 'contests',
-    'filter': {'status': 'active'},
+    'filter': {'status': 'active', 'liveEndedWindow': '24h'},
     'order': 'starts_at asc',
     'playerPlan': userPlanKey,
   });
@@ -35,14 +35,16 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) {
   final stream = supabase
       .from('contests')
       .stream(primaryKey: ['id'])
-      .eq('status', 'active')
       .order('starts_at', ascending: true)
       .map((rows) {
         authLogResponse('contestsStream', {'count': rows.length});
         final now = DateTime.now();
         final contests = rows
             .map(Contest.fromJson)
-            .where((contest) => contest.endsAt.isAfter(now))
+            .where((contest) {
+              if (contest.isLive) return contest.isLiveVisibleOnHome;
+              return contest.status == 'active' && contest.endsAt.isAfter(now);
+            })
             .where((contest) => contest.isAccessibleForPlan(userPlanKey))
             .toList();
         contests.sort((a, b) {
@@ -58,6 +60,41 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) {
   return stream.handleError((Object error, StackTrace stackTrace) {
     authLogError('contestsStream', error, stackTrace);
   });
+});
+
+final userParticipatedContestIdsProvider = StreamProvider<Set<String>>((ref) {
+  final supabase = ref.watch(supabaseProvider);
+  final user = supabase.auth.currentUser;
+  if (user == null) return Stream.value(const <String>{});
+
+  return supabase
+      .from('participations')
+      .stream(primaryKey: ['id'])
+      .eq('user_id', user.id)
+      .map((rows) {
+        return rows
+            .map((row) => row['contest_id'] as String?)
+            .whereType<String>()
+            .toSet();
+      });
+});
+
+final userRegisteredLiveQuizIdsProvider = StreamProvider<Set<String>>((ref) {
+  final supabase = ref.watch(supabaseProvider);
+  final user = supabase.auth.currentUser;
+  if (user == null) return Stream.value(const <String>{});
+
+  return supabase
+      .from('live_quiz_registrations')
+      .stream(primaryKey: ['id'])
+      .eq('user_id', user.id)
+      .map((rows) {
+        return rows
+            .where((row) => (row['status'] as String? ?? '') == 'registered')
+            .map((row) => row['contest_id'] as String?)
+            .whereType<String>()
+            .toSet();
+      });
 });
 
 final contestsShuffleSeedProvider =
@@ -121,6 +158,7 @@ class ContestDetailData {
   final int participantsCount;
   final ContestPrediction? prediction;
   final ContestDrawSettings? drawSettings;
+  final bool hasLiveRegistration;
 
   const ContestDetailData({
     required this.contest,
@@ -129,6 +167,7 @@ class ContestDetailData {
     required this.participantsCount,
     required this.prediction,
     required this.drawSettings,
+    required this.hasLiveRegistration,
   });
 }
 
@@ -302,6 +341,26 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
       .maybeSingle();
   authLogResponse('contestParticipationCheck', participation);
 
+  var hasLiveRegistration = false;
+  if (contest.isLive) {
+    try {
+      authLogPayload('liveRegistrationCheck', {
+        'userId': user.id,
+        'contestId': contestId,
+      });
+      final registration = await supabase
+          .from('live_quiz_registrations')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('contest_id', contestId)
+          .maybeSingle();
+      authLogResponse('liveRegistrationCheck', registration);
+      hasLiveRegistration = registration != null;
+    } catch (error, stackTrace) {
+      authLogError('liveRegistrationCheck', error, stackTrace);
+    }
+  }
+
   authLogPayload('contestParticipantsFetch', {'contestId': contestId});
   final participants = await supabase
       .from('participations')
@@ -362,6 +421,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     participantsCount: participants.length,
     prediction: prediction,
     drawSettings: drawSettings,
+    hasLiveRegistration: hasLiveRegistration,
   );
   _contestDetailCache[cacheKey] = detail;
 

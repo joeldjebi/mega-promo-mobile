@@ -15,12 +15,14 @@ import '../models/question.dart';
 
 class QuizResultScreen extends ConsumerStatefulWidget {
   final String contestId;
+  final String participationId;
   final List<QuizQuestion> questions;
   final List<QuizAnswer> answers;
 
   const QuizResultScreen({
     super.key,
     required this.contestId,
+    required this.participationId,
     required this.questions,
     required this.answers,
   });
@@ -51,28 +53,55 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
     if (user == null) return;
 
     final profile = await ref.read(userProfileProvider.future);
-    await supabase.from('participations').insert({
-      'user_id': user.id,
-      'contest_id': widget.contestId,
-      'score': _points,
-      'answers': widget.answers.map((answer) => answer.toJson()).toList(),
-      'completed': true,
-    });
+    final answersPayload = widget.answers
+        .map((answer) => answer.toJson())
+        .toList();
+
+    if (widget.participationId.isNotEmpty) {
+      await supabase
+          .from('participations')
+          .update({
+            'score': _points,
+            'answers': {
+              'type': 'quiz',
+              'status': 'completed',
+              'completed_at': DateTime.now().toIso8601String(),
+              'items': answersPayload,
+            },
+            'completed': true,
+          })
+          .eq('id', widget.participationId)
+          .eq('user_id', user.id);
+    } else {
+      await supabase.from('participations').insert({
+        'user_id': user.id,
+        'contest_id': widget.contestId,
+        'score': _points,
+        'answers': answersPayload,
+        'completed': true,
+      });
+      await supabase
+          .from('users')
+          .update({
+            'participations_today': profile.participationsToday + 1,
+            'last_participation_date': DateTime.now().toIso8601String().split(
+              'T',
+            )[0],
+          })
+          .eq('id', user.id);
+    }
+
     await supabase
         .from('users')
-        .update({
-          'points_total': profile.pointsTotal + _points,
-          'participations_today': profile.participationsToday + 1,
-          'last_participation_date': DateTime.now().toIso8601String().split(
-            'T',
-          )[0],
-        })
+        .update({'points_total': profile.pointsTotal + _points})
         .eq('id', user.id);
 
     await awardBadgesAfterParticipation(
       supabase: supabase,
       profile: profile,
-      nextParticipationsToday: profile.participationsToday + 1,
+      nextParticipationsToday: widget.participationId.isNotEmpty
+          ? profile.participationsToday
+          : profile.participationsToday + 1,
       nextPointsTotal: profile.pointsTotal + _points,
     );
 

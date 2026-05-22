@@ -5,6 +5,21 @@ import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../home/providers/user_profile_provider.dart';
 
+const _fallbackPaymentMethods = [
+  PaymentMethodOption(
+    id: 'wave-default',
+    name: 'Wave',
+    operatorKey: 'wave',
+    country: 'Côte d’Ivoire',
+    paymentUrl: 'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/',
+    instructions:
+        'Paie avec Wave, puis envoie la capture ou la référence de paiement pour validation.',
+    proofPhone: '+225 0758754662',
+    isActive: true,
+    orderIndex: 1,
+  ),
+];
+
 class PlayerPlan {
   final String id;
   final String key;
@@ -137,13 +152,53 @@ class PlayerSubscription {
   }
 }
 
+class PaymentMethodOption {
+  final String id;
+  final String name;
+  final String operatorKey;
+  final String country;
+  final String paymentUrl;
+  final String instructions;
+  final String proofPhone;
+  final bool isActive;
+  final int orderIndex;
+
+  const PaymentMethodOption({
+    required this.id,
+    required this.name,
+    required this.operatorKey,
+    required this.country,
+    required this.paymentUrl,
+    required this.instructions,
+    required this.proofPhone,
+    required this.isActive,
+    required this.orderIndex,
+  });
+
+  factory PaymentMethodOption.fromJson(Map<String, dynamic> json) {
+    return PaymentMethodOption(
+      id: json['id'] as String,
+      name: json['name'] as String? ?? 'Paiement',
+      operatorKey: json['operator_key'] as String? ?? 'manual',
+      country: json['country'] as String? ?? 'Côte d’Ivoire',
+      paymentUrl: json['payment_url'] as String? ?? '',
+      instructions: json['instructions'] as String? ?? '',
+      proofPhone: json['proof_phone'] as String? ?? '',
+      isActive: json['is_active'] as bool? ?? true,
+      orderIndex: (json['order_index'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class PlayerPlansData {
   final List<PlayerPlan> plans;
   final PlayerSubscription? currentSubscription;
+  final List<PaymentMethodOption> paymentMethods;
 
   const PlayerPlansData({
     required this.plans,
     required this.currentSubscription,
+    required this.paymentMethods,
   });
 }
 
@@ -182,6 +237,25 @@ final playerPlansProvider = FutureProvider.autoDispose<PlayerPlansData>((
 
   authLogResponse('playerPlansFetch', {'count': plans.length});
 
+  var paymentMethods = _fallbackPaymentMethods;
+  try {
+    final paymentMethodRows = await supabase
+        .from('payment_methods')
+        .select(
+          'id, name, operator_key, country, payment_url, instructions, proof_phone, is_active, order_index',
+        )
+        .eq('is_active', true)
+        .order('order_index', ascending: true);
+    paymentMethods = paymentMethodRows
+        .map(PaymentMethodOption.fromJson)
+        .toList(growable: false);
+    if (paymentMethods.isEmpty) {
+      paymentMethods = _fallbackPaymentMethods;
+    }
+  } catch (error, stackTrace) {
+    authLogError('paymentMethodsFetch', error, stackTrace);
+  }
+
   authLogPayload('playerSubscriptionFetch', {'userId': user.id});
   final subscriptionRows = await supabase
       .from('player_subscriptions')
@@ -201,12 +275,14 @@ final playerPlansProvider = FutureProvider.autoDispose<PlayerPlansData>((
     currentSubscription: subscriptionRows.isEmpty
         ? null
         : PlayerSubscription.fromJson(subscriptionRows.first),
+    paymentMethods: paymentMethods,
   );
 });
 
 Future<PlayerSubscription> subscribeToPlayerPlan(
   WidgetRef ref,
   PlayerPlan plan,
+  PaymentMethodOption? paymentMethod,
 ) async {
   final supabase = Supabase.instance.client;
   final user = supabase.auth.currentUser;
@@ -216,6 +292,7 @@ Future<PlayerSubscription> subscribeToPlayerPlan(
   final expiresAt = now.add(Duration(days: plan.durationDays));
   final status = plan.price == 0 ? 'active' : 'pending';
 
+  final selectedPaymentMethod = plan.price == 0 ? null : paymentMethod;
   final payload = {
     'user_id': user.id,
     'plan_id': plan.id,
@@ -223,9 +300,12 @@ Future<PlayerSubscription> subscribeToPlayerPlan(
     'status': status,
     'starts_at': now.toIso8601String(),
     'expires_at': expiresAt.toIso8601String(),
-    'payment_method': plan.price == 0 ? 'free' : 'mobile_money',
+    'payment_method': plan.price == 0
+        ? 'free'
+        : selectedPaymentMethod?.operatorKey ?? 'mobile_money',
     if (plan.price > 0)
-      'payment_reference': 'wave_manual_${now.millisecondsSinceEpoch}',
+      'payment_reference':
+          '${selectedPaymentMethod?.operatorKey ?? 'manual'}_${now.millisecondsSinceEpoch}',
   };
 
   authLogPayload('playerSubscribe', payload);
@@ -241,10 +321,7 @@ Future<PlayerSubscription> subscribeToPlayerPlan(
   if (plan.price == 0) {
     await supabase
         .from('users')
-        .update({
-          'is_premium': false,
-          'premium_expires_at': null,
-        })
+        .update({'is_premium': false, 'premium_expires_at': null})
         .eq('id', user.id);
   }
 

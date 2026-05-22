@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,21 +11,35 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../live_quiz/services/live_quiz_service.dart';
 import '../../rewards/services/badge_award_service.dart';
 import '../../social/share_helpers.dart';
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
 import '../widgets/contest_timer.dart';
 
-class ContestDetailScreen extends ConsumerWidget {
+class ContestDetailScreen extends ConsumerStatefulWidget {
   final String contestId;
 
   const ContestDetailScreen({super.key, required this.contestId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final detail = ref.watch(contestDetailProvider(contestId));
+  ConsumerState<ContestDetailScreen> createState() =>
+      _ContestDetailScreenState();
+}
+
+class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
+  RealtimeChannel? _refreshChannel;
+  String? _currentUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    final userId = ref.watch(authStateProvider).value?.id;
+    _syncRealtimeRefresh(userId);
+
+    final detail = ref.watch(contestDetailProvider(widget.contestId));
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -33,12 +49,75 @@ class ContestDetailScreen extends ConsumerWidget {
         error: (error, stackTrace) => _ContestDetailError(
           error: error,
           onRetry: () {
-            clearContestDetailCache(contestId);
-            ref.invalidate(contestDetailProvider(contestId));
+            clearContestDetailCache(widget.contestId);
+            ref.invalidate(contestDetailProvider(widget.contestId));
           },
         ),
       ),
     );
+  }
+
+  void _syncRealtimeRefresh(String? userId) {
+    if (_currentUserId == userId) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _currentUserId == userId) return;
+      _subscribeRealtimeRefresh(userId);
+    });
+  }
+
+  void _subscribeRealtimeRefresh(String? userId) {
+    final supabase = ref.read(supabaseProvider);
+    final previousChannel = _refreshChannel;
+    if (previousChannel != null) {
+      unawaited(supabase.removeChannel(previousChannel));
+    }
+
+    _refreshChannel = null;
+    _currentUserId = userId;
+    if (userId == null) return;
+
+    void refreshContestState(PostgresChangePayload payload) {
+      clearContestDetailCache(widget.contestId);
+      ref
+        ..invalidate(userProfileProvider)
+        ..invalidate(contestsProvider)
+        ..invalidate(contestDetailProvider(widget.contestId));
+    }
+
+    _refreshChannel = supabase
+        .channel('contest-detail-refresh-${widget.contestId}-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'users',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: userId,
+          ),
+          callback: refreshContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'participations',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshContestState,
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    final channel = _refreshChannel;
+    if (channel != null) {
+      unawaited(Supabase.instance.client.removeChannel(channel));
+    }
+    super.dispose();
   }
 }
 
@@ -54,8 +133,30 @@ class _ContestDetailBody extends ConsumerWidget {
   bool get _planAccessDenied =>
       !data.contest.isAccessibleForPlan(data.userProfile.planKey);
 
+  bool get _isWaitingRoomOpen {
+    final liveStartsAt = data.contest.liveStartsAt;
+    if (liveStartsAt == null) return false;
+    final now = DateTime.now();
+    return now.isAfter(liveStartsAt.subtract(const Duration(minutes: 5))) &&
+        now.isBefore(liveStartsAt);
+  }
+
+  bool get _canStartLiveQuiz {
+    final liveStartsAt = data.contest.liveStartsAt;
+    if (liveStartsAt == null) return false;
+    final now = DateTime.now();
+    return !now.isBefore(liveStartsAt) && now.isBefore(data.contest.endsAt);
+  }
+
   String get _buttonText {
     if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
+    if (data.contest.isLive) {
+      if (data.contest.isLiveEnded) return 'Quiz Live terminé';
+      if (!data.hasLiveRegistration) return 'Je m’inscris au Quiz Live';
+      if (_isWaitingRoomOpen) return 'Entrer en salle d’attente';
+      if (_canStartLiveQuiz) return 'Démarrer le Quiz Live';
+      return 'Inscrit au Quiz Live';
+    }
     if (data.hasParticipated) return 'Déjà participé · Actualiser';
     if (_dailyLimitReached) {
       return 'Limite ${data.userProfile.dailyParticipationLimit}/jour atteinte';
@@ -95,8 +196,116 @@ class _ContestDetailBody extends ConsumerWidget {
       return;
     }
 
+    if (data.contest.isLive) {
+      if (data.contest.isLiveEnded) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ce Quiz Live est terminé.')),
+        );
+        return;
+      }
+
+      final supabase = Supabase.instance.client;
+      try {
+        if (!data.hasLiveRegistration) {
+          await supabase.rpc(
+            'register_live_quiz',
+            params: {'p_contest_id': data.contest.id},
+          );
+          _refreshParticipationState(ref);
+          if (!context.mounted) return;
+          if (_isWaitingRoomOpen) {
+            context.go('/contests/${data.contest.id}/live-waiting');
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Inscription au Quiz Live validée.')),
+          );
+          return;
+        }
+
+        if (_isWaitingRoomOpen) {
+          await supabase.rpc(
+            'join_live_quiz_waiting_room',
+            params: {'p_contest_id': data.contest.id},
+          );
+          _refreshParticipationState(ref);
+          if (!context.mounted) return;
+          context.go('/contests/${data.contest.id}/live-waiting');
+          return;
+        }
+
+        if (_canStartLiveQuiz) {
+          final result = await startLiveQuizParticipation(data: data);
+          _refreshParticipationState(ref);
+          if (!context.mounted) return;
+          context.go(
+            '/contests/${data.contest.id}/quiz',
+            extra: {'participationId': result.participationId},
+          );
+          return;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reviens 5 minutes avant le début du Quiz Live.'),
+          ),
+        );
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
+      return;
+    }
+
     if (data.contest.type == ContestType.quiz) {
-      context.go('/contests/${data.contest.id}/quiz');
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      try {
+        final participation = await supabase
+            .from('participations')
+            .insert({
+              'user_id': user.id,
+              'contest_id': data.contest.id,
+              'score': 0,
+              'answers': {
+                'type': data.contest.type.name,
+                'status': 'started',
+                'started_at': DateTime.now().toIso8601String(),
+              },
+              'completed': false,
+            })
+            .select('id')
+            .single();
+
+        await supabase
+            .from('users')
+            .update({
+              'participations_today': data.userProfile.participationsToday + 1,
+              'last_participation_date': DateTime.now().toIso8601String().split(
+                'T',
+              )[0],
+            })
+            .eq('id', user.id);
+
+        _refreshParticipationState(ref);
+        if (!context.mounted) return;
+        context.go(
+          '/contests/${data.contest.id}/quiz',
+          extra: {'participationId': participation['id'] as String},
+        );
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Participation déjà enregistrée pour ce concours.'),
+          ),
+        );
+        _refreshParticipationState(ref);
+      }
       return;
     }
 
@@ -129,49 +338,74 @@ class _ContestDetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final contest = data.contest;
 
+    if (contest.isLiveEnded) {
+      return _EndedLiveQuizDetail(data: data);
+    }
+
     return Stack(
       children: [
         CustomScrollView(
           slivers: [
             SliverAppBar(
               pinned: true,
-              expandedHeight: 132,
+              stretch: true,
+              expandedHeight: 184,
               backgroundColor: AppColors.background,
-              leading: IconButton(
-                onPressed: () {
-                  if (context.canPop()) {
-                    context.pop();
-                  } else {
-                    context.go('/home');
-                  }
-                },
-                icon: const Icon(Icons.arrow_back_rounded),
+              surfaceTintColor: Colors.transparent,
+              leadingWidth: 62,
+              leading: Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: _HeroActionButton(
+                  icon: Icons.arrow_back_rounded,
+                  tooltip: 'Retour',
+                  onPressed: () {
+                    if (context.canPop()) {
+                      context.pop();
+                    } else {
+                      context.go('/home');
+                    }
+                  },
+                ),
               ),
               actions: [
-                IconButton(
-                  onPressed: () => _refreshParticipationState(ref),
-                  icon: const Icon(Icons.refresh_rounded),
+                _HeroActionButton(
+                  icon: Icons.refresh_rounded,
                   tooltip: 'Actualiser',
+                  onPressed: () => _refreshParticipationState(ref),
                 ),
-                IconButton(
-                  onPressed: () => _shareOnWhatsApp(context),
-                  icon: const Icon(Icons.share_rounded),
+                const SizedBox(width: 8),
+                _HeroActionButton(
+                  icon: Icons.share_rounded,
                   tooltip: 'Partager sur WhatsApp',
+                  onPressed: () => _shareOnWhatsApp(context),
                 ),
+                const SizedBox(width: 14),
               ],
               flexibleSpace: FlexibleSpaceBar(
+                stretchModes: const [
+                  StretchMode.zoomBackground,
+                  StretchMode.fadeTitle,
+                ],
                 background: _ContestHeroImage(contest: contest),
               ),
             ),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 18, 24, 110),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  _TypeBadge(type: contest.type),
-                  if (contest.brandLogoUrl?.isNotEmpty == true) ...[
-                    const SizedBox(height: 12),
-                    _ContestBrandLogoLine(contest: contest),
-                  ],
+                  Row(
+                    children: [
+                      _TypeBadge(type: contest.type),
+                      if (contest.allowedPlayerPlanKeys.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        _AccessBadge(label: contest.accessLabel),
+                      ],
+                      if (contest.brandLogoUrl?.isNotEmpty == true) ...[
+                        const Spacer(),
+                        Flexible(child: _ContestBrandLogoLine(contest: contest)),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 16),
                   Text(contest.title, style: AppTextStyles.h1),
                   const SizedBox(height: 10),
@@ -179,9 +413,12 @@ class _ContestDetailBody extends ConsumerWidget {
                     _formatPrize(contest.prizeValue),
                     style: AppTextStyles.price,
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   AppCard(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
+                    ),
                     child: Row(
                       children: [
                         Expanded(
@@ -191,6 +428,7 @@ class _ContestDetailBody extends ConsumerWidget {
                             value: '${data.participantsCount}',
                           ),
                         ),
+                        const _StatDivider(),
                         Expanded(
                           child: _DetailStat(
                             icon: Icons.workspace_premium_rounded,
@@ -198,6 +436,7 @@ class _ContestDetailBody extends ConsumerWidget {
                             value: '${contest.winnersCount}',
                           ),
                         ),
+                        const _StatDivider(),
                         Expanded(
                           child: _DetailStat(
                             icon: Icons.schedule_rounded,
@@ -208,6 +447,42 @@ class _ContestDetailBody extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  if (contest.isLive) ...[
+                    const SizedBox(height: 14),
+                    AppCard(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.bolt_rounded,
+                            color: AppColors.accentGreen,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data.hasLiveRegistration
+                                      ? 'Inscription confirmée'
+                                      : 'Quiz Live',
+                                  style: AppTextStyles.h3.copyWith(
+                                    color: AppColors.accentGreen,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _liveQuizInfoText(contest),
+                                  style: AppTextStyles.bodySecondary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (_planAccessDenied) ...[
                     const SizedBox(height: 14),
                     AppCard(
@@ -227,14 +502,55 @@ class _ContestDetailBody extends ConsumerWidget {
                       ),
                     ),
                   ],
+                  if (data.hasParticipated) ...[
+                    const SizedBox(height: 14),
+                    AppCard(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: AppColors.accentGreen,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Déjà participé',
+                                  style: AppTextStyles.h3.copyWith(
+                                    color: AppColors.accentGreen,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Ta participation est enregistrée pour ce concours.',
+                                  style: AppTextStyles.bodySecondary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 26),
                   Text('Description', style: AppTextStyles.h2),
                   const SizedBox(height: 10),
-                  Text(contest.description, style: AppTextStyles.bodySecondary),
-                  const SizedBox(height: 26),
+                  AppCard(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      contest.description,
+                      style: AppTextStyles.bodySecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
                   Text('Le prix', style: AppTextStyles.h2),
                   const SizedBox(height: 10),
                   AppCard(
+                    padding: const EdgeInsets.all(16),
                     child: Text(
                       contest.prizeDescription.isEmpty
                           ? 'Prix surprise offert par la marque partenaire.'
@@ -249,14 +565,15 @@ class _ContestDetailBody extends ConsumerWidget {
           ],
         ),
         Positioned(
-          left: 24,
-          right: 24,
+          left: 20,
+          right: 20,
           bottom: 18,
           child: SafeArea(
             top: false,
             child: AppButton(
               text: _buttonText,
-              onPressed: _planAccessDenied || _dailyLimitReached
+              onPressed: _planAccessDenied ||
+                      (!data.contest.isLive && _dailyLimitReached)
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
@@ -265,6 +582,118 @@ class _ContestDetailBody extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _EndedLiveQuizDetail extends StatelessWidget {
+  final ContestDetailData data;
+
+  const _EndedLiveQuizDetail({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final contest = data.contest;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _HeroActionButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Retour',
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go('/home');
+                  }
+                },
+              ),
+            ),
+            const Spacer(),
+            Container(
+              height: 170,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: AppColors.surfaceBorder),
+                color: AppColors.surface,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(25),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _ContestHeroImage(contest: contest),
+                    Container(color: Colors.black.withValues(alpha: 0.52)),
+                    const Center(
+                      child: Icon(
+                        Icons.lock_clock_rounded,
+                        color: AppColors.textSecondary,
+                        size: 58,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(
+              'Quiz Live terminé',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.h1.copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              contest.title,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.h3.copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 18),
+            AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(
+                    'Ce Quiz Live n’est plus accessible. Il reste visible quelques heures pour information, puis disparaîtra automatiquement de l’accueil.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DetailStat(
+                          icon: Icons.groups_rounded,
+                          label: 'Inscrits',
+                          value: '${contest.registeredCount}',
+                        ),
+                      ),
+                      const _StatDivider(),
+                      Expanded(
+                        child: _DetailStat(
+                          icon: Icons.workspace_premium_rounded,
+                          label: 'Prix',
+                          value: _formatPrize(contest.prizeValue),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            AppButton(
+              text: 'Retour à l’accueil',
+              onPressed: () => context.go('/home'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -702,25 +1131,49 @@ class _ContestHeroImage extends StatelessWidget {
           if (hasImage)
             _NetworkPromoImage(url: imageUrl)
           else
-            Center(
-              child: Container(
-                width: 82,
-                height: 82,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: AppColors.surfaceBorder),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    contest.type.color.withValues(alpha: 0.32),
+                    AppColors.surface,
+                    AppColors.background,
+                  ],
                 ),
-                child: Icon(
-                  contest.type.icon,
-                  color: AppColors.primary,
-                  size: 42,
+              ),
+              child: Center(
+                child: Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: AppColors.background.withValues(alpha: 0.42),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Icon(
+                    contest.type.icon,
+                    color: contest.type.color,
+                    size: 48,
+                  ),
                 ),
               ),
             ),
           DecoratedBox(
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.34),
+                  Colors.transparent,
+                  AppColors.background.withValues(alpha: 0.88),
+                ],
+                stops: const [0, 0.48, 1],
+              ),
             ),
           ),
         ],
@@ -743,54 +1196,90 @@ class _NetworkPromoImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxImageWidth = (constraints.maxWidth * 0.5)
-            .clamp(104.0, 180.0)
-            .toDouble();
-        final maxImageHeight = (constraints.maxHeight * 0.56)
-            .clamp(60.0, 94.0)
-            .toDouble();
-
-        return Center(
-          child: Container(
-            constraints: BoxConstraints(
-              maxWidth: maxImageWidth,
-              maxHeight: maxImageHeight,
-            ),
-            padding: EdgeInsets.all(_isSvg ? 12 : 0),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.surfaceBorder),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: _isSvg
-                ? SvgPicture.network(
-                    url,
-                    fit: BoxFit.contain,
-                    placeholderBuilder: (_) => const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : Image.network(
-                    url,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Center(
-                      child: Icon(
-                        Icons.image_not_supported_rounded,
-                        color: AppColors.textHint,
-                        size: 34,
-                      ),
-                    ),
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      );
-                    },
+        if (_isSvg) {
+          return Center(
+            child: Container(
+              width: (constraints.maxWidth * 0.54).clamp(140.0, 220.0),
+              height: (constraints.maxHeight * 0.45).clamp(86.0, 128.0),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.surfaceBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.16),
+                    blurRadius: 34,
+                    offset: const Offset(0, 18),
                   ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SvgPicture.network(
+                url,
+                fit: BoxFit.contain,
+                placeholderBuilder: (_) => const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Image.network(
+          url,
+          fit: BoxFit.cover,
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          errorBuilder: (_, _, _) => const Center(
+            child: Icon(
+              Icons.image_not_supported_rounded,
+              color: AppColors.textHint,
+              size: 38,
+            ),
           ),
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            );
+          },
         );
       },
+    );
+  }
+}
+
+class _HeroActionButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _HeroActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        color: AppColors.background.withValues(alpha: 0.72),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: Tooltip(
+            message: tooltip,
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(icon, color: AppColors.textPrimary, size: 22),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -888,6 +1377,38 @@ class _TypeBadge extends StatelessWidget {
   }
 }
 
+class _AccessBadge extends StatelessWidget {
+  final String label;
+
+  const _AccessBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppColors.gold.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.lock_rounded, color: AppColors.gold, size: 13),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: AppTextStyles.label.copyWith(
+              color: AppColors.gold,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DetailStat extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -915,6 +1436,20 @@ class _DetailStat extends StatelessWidget {
   }
 }
 
+class _StatDivider extends StatelessWidget {
+  const _StatDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 46,
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      color: AppColors.surfaceBorder,
+    );
+  }
+}
+
 class _ContestDetailShimmer extends StatelessWidget {
   const _ContestDetailShimmer();
 
@@ -926,7 +1461,7 @@ class _ContestDetailShimmer extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.zero,
         children: const [
-          _ShimmerBox(height: 180),
+          _ShimmerBox(height: 184),
           Padding(
             padding: EdgeInsets.all(24),
             child: Column(
@@ -1018,4 +1553,21 @@ String _formatPrize(num value) {
 String _shortDate(DateTime date) {
   return '${date.day.toString().padLeft(2, '0')}/'
       '${date.month.toString().padLeft(2, '0')}/${date.year}';
+}
+
+String _liveQuizInfoText(Contest contest) {
+  final liveStartsAt = contest.liveStartsAt;
+  if (liveStartsAt == null) {
+    return 'L’heure de départ sera confirmée bientôt.';
+  }
+
+  final date =
+      '${liveStartsAt.day.toString().padLeft(2, '0')}/'
+      '${liveStartsAt.month.toString().padLeft(2, '0')}/${liveStartsAt.year}';
+  final time =
+      '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
+      '${liveStartsAt.minute.toString().padLeft(2, '0')}';
+
+  return 'Départ le $date à $time. Salle d’attente ouverte 5 minutes avant. '
+      '${contest.registeredCount} joueur(s) inscrit(s).';
 }

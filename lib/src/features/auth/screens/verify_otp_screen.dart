@@ -29,6 +29,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   Timer? _timer;
   int _secondsRemaining = _resendDuration;
   bool _isSubmitting = false;
+  bool _isApplyingCode = false;
 
   String get _code => _controllers.map((controller) => controller.text).join();
   bool get _isComplete => _code.length == _otpLength;
@@ -79,7 +80,45 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     });
   }
 
+  void _applyOtpCode(String rawValue, {int startIndex = 0}) {
+    final digits = rawValue.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return;
+
+    _isApplyingCode = true;
+    for (var offset = 0; offset < digits.length; offset += 1) {
+      final targetIndex = startIndex + offset;
+      if (targetIndex >= _otpLength) break;
+      final controller = _controllers[targetIndex];
+      controller.text = digits[offset];
+      controller.selection = TextSelection.collapsed(
+        offset: controller.text.length,
+      );
+    }
+    _isApplyingCode = false;
+
+    final nextEmptyIndex = _controllers.indexWhere(
+      (controller) => controller.text.isEmpty,
+    );
+    if (nextEmptyIndex == -1) {
+      FocusScope.of(context).unfocus();
+    } else {
+      _focusNodes[nextEmptyIndex].requestFocus();
+    }
+
+    setState(() {});
+    if (_isComplete) {
+      Future.microtask(_submit);
+    }
+  }
+
   void _handleDigitChanged(String value, int index) {
+    if (_isApplyingCode) return;
+
+    if (value.length > 1) {
+      _applyOtpCode(value, startIndex: index);
+      return;
+    }
+
     if (value.isNotEmpty && index < _otpLength - 1) {
       _focusNodes[index + 1].requestFocus();
     }
@@ -252,15 +291,19 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 34),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(
-                  _otpLength,
-                  (index) => _OtpDigitField(
-                    controller: _controllers[index],
-                    focusNode: _focusNodes[index],
-                    onChanged: (value) => _handleDigitChanged(value, index),
-                    onKeyEvent: (event) => _handleBackspace(event, index),
+              AutofillGroup(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: List.generate(
+                    _otpLength,
+                    (index) => _OtpDigitField(
+                      controller: _controllers[index],
+                      focusNode: _focusNodes[index],
+                      enableAutofill: index == 0,
+                      maxLength: index == 0 ? _otpLength : 1,
+                      onChanged: (value) => _handleDigitChanged(value, index),
+                      onKeyEvent: (event) => _handleBackspace(event, index),
+                    ),
                   ),
                 ),
               ),
@@ -302,12 +345,16 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 class _OtpDigitField extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final bool enableAutofill;
+  final int maxLength;
   final ValueChanged<String> onChanged;
   final KeyEventResult Function(KeyEvent event) onKeyEvent;
 
   const _OtpDigitField({
     required this.controller,
     required this.focusNode,
+    required this.enableAutofill,
+    required this.maxLength,
     required this.onChanged,
     required this.onKeyEvent,
   });
@@ -325,9 +372,12 @@ class _OtpDigitField extends StatelessWidget {
           textAlign: TextAlign.center,
           keyboardType: TextInputType.number,
           textInputAction: TextInputAction.next,
+          autofillHints: enableAutofill
+              ? const [AutofillHints.oneTimeCode]
+              : null,
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(1),
+            LengthLimitingTextInputFormatter(maxLength),
           ],
           style: AppTextStyles.h2,
           cursorColor: AppColors.primaryLight,

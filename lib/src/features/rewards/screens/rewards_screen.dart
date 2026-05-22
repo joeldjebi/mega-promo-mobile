@@ -24,29 +24,29 @@ class RewardsScreen extends ConsumerWidget {
           },
           child: rewards.when(
             data: (items) => ListView(
-              padding: const EdgeInsets.fromLTRB(24, 26, 24, 28),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
               children: [
                 Center(
                   child: Text(
                     'GAINS',
                     style: AppTextStyles.label.copyWith(
                       color: AppColors.textHint,
-                      fontSize: 18,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                const SizedBox(height: 26),
-                _RewardsSummary(items: items),
-                const SizedBox(height: 28),
-                Text('MES RÉCOMPENSES', style: AppTextStyles.label),
                 const SizedBox(height: 14),
+                _RewardsSummary(items: items),
+                const SizedBox(height: 18),
+                Text('MES RÉCOMPENSES', style: AppTextStyles.label),
+                const SizedBox(height: 10),
                 if (items.isEmpty)
                   const _EmptyRewardsState()
                 else
                   ...items.map(
                     (reward) => Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.only(bottom: 9),
                       child: _RewardCard(reward: reward),
                     ),
                   ),
@@ -102,19 +102,19 @@ class _RewardsSummary extends StatelessWidget {
 
     return AppCard(
       showGlow: true,
-      padding: const EdgeInsets.all(22),
-      borderRadius: 28,
+      padding: const EdgeInsets.all(16),
+      borderRadius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 54,
-                height: 54,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: AppColors.goldSoft,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(15),
                   border: Border.all(
                     color: AppColors.gold.withValues(alpha: 0.26),
                   ),
@@ -122,38 +122,41 @@ class _RewardsSummary extends StatelessWidget {
                 child: const Icon(
                   Icons.card_giftcard_rounded,
                   color: AppColors.gold,
-                  size: 28,
+                  size: 23,
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Valeur totale', style: AppTextStyles.bodySecondary),
+                    Text(
+                      'Valeur totale',
+                      style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       _formatAmount(totalValue),
-                      style: AppTextStyles.price.copyWith(fontSize: 30),
+                      style: AppTextStyles.price.copyWith(fontSize: 23),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 14),
           Container(height: 1, color: AppColors.separator),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: _SummaryStat(label: 'Gains', value: '${items.length}'),
               ),
-              Container(width: 1, height: 44, color: AppColors.separator),
+              Container(width: 1, height: 34, color: AppColors.separator),
               Expanded(
                 child: _SummaryStat(label: 'Reçus', value: '$received'),
               ),
-              Container(width: 1, height: 44, color: AppColors.separator),
+              Container(width: 1, height: 34, color: AppColors.separator),
               Expanded(
                 child: _SummaryStat(label: 'En attente', value: '$pending'),
               ),
@@ -175,9 +178,9 @@ class _SummaryStat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: AppTextStyles.h2),
-        const SizedBox(height: 4),
-        Text(label, style: AppTextStyles.bodySmall),
+        Text(value, style: AppTextStyles.h3.copyWith(fontSize: 15)),
+        const SizedBox(height: 2),
+        Text(label, style: AppTextStyles.bodySmall.copyWith(fontSize: 10)),
       ],
     );
   }
@@ -193,21 +196,21 @@ class _RewardCard extends StatelessWidget {
     final status = _statusData(reward);
 
     return AppCard(
-      padding: const EdgeInsets.all(18),
-      borderRadius: 24,
+      padding: const EdgeInsets.all(12),
+      borderRadius: 18,
       child: Row(
         children: [
           Container(
-            width: 58,
-            height: 58,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: status.color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(15),
               border: Border.all(color: status.color.withValues(alpha: 0.22)),
             ),
-            child: Icon(status.icon, color: status.color, size: 28),
+            child: Icon(status.icon, color: status.color, size: 22),
           ),
-          const SizedBox(width: 15),
+          const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -219,19 +222,22 @@ class _RewardCard extends StatelessWidget {
                         reward.description,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.h3,
+                        style: AppTextStyles.h3.copyWith(
+                          fontSize: 13.5,
+                          height: 1.25,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 7),
                     _StatusPill(status: status),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 5),
                 Text(
                   _formatAmount(reward.value),
-                  style: AppTextStyles.price.copyWith(fontSize: 18),
+                  style: AppTextStyles.price.copyWith(fontSize: 15),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
                   _rewardMeta(reward),
                   maxLines: 1,
@@ -255,7 +261,7 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: status.color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
@@ -264,6 +270,7 @@ class _StatusPill extends StatelessWidget {
       child: Text(
         status.label,
         style: AppTextStyles.bodySmall.copyWith(
+          fontSize: 10,
           color: status.color,
           fontWeight: FontWeight.w800,
         ),
@@ -278,31 +285,34 @@ class _EmptyRewardsState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
-      borderRadius: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 26),
+      borderRadius: 20,
       child: Column(
         children: [
           Container(
-            width: 76,
-            height: 76,
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
               color: AppColors.goldSoft,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(19),
               border: Border.all(color: AppColors.gold.withValues(alpha: 0.26)),
             ),
             child: const Icon(
               Icons.card_giftcard_rounded,
               color: AppColors.gold,
-              size: 36,
+              size: 28,
             ),
           ),
-          const SizedBox(height: 18),
-          Text('Aucun gain pour le moment', style: AppTextStyles.h2),
-          const SizedBox(height: 8),
+          const SizedBox(height: 14),
+          Text(
+            'Aucun gain pour le moment',
+            style: AppTextStyles.h2.copyWith(fontSize: 17),
+          ),
+          const SizedBox(height: 6),
           Text(
             'Participe aux concours actifs pour débloquer tes prochains lots.',
             textAlign: TextAlign.center,
-            style: AppTextStyles.bodySecondary,
+            style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
           ),
         ],
       ),
@@ -319,17 +329,17 @@ class _RewardsShimmer extends StatelessWidget {
       baseColor: AppColors.surface,
       highlightColor: AppColors.surfaceElevated,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 34, 24, 24),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 18),
         children: const [
-          _ShimmerBlock(height: 18, width: 90),
-          SizedBox(height: 26),
-          _ShimmerBlock(height: 190, width: double.infinity),
-          SizedBox(height: 28),
-          _ShimmerBlock(height: 14, width: 140),
+          _ShimmerBlock(height: 16, width: 80),
           SizedBox(height: 14),
-          _ShimmerBlock(height: 112, width: double.infinity),
-          SizedBox(height: 14),
-          _ShimmerBlock(height: 112, width: double.infinity),
+          _ShimmerBlock(height: 134, width: double.infinity),
+          SizedBox(height: 18),
+          _ShimmerBlock(height: 12, width: 120),
+          SizedBox(height: 10),
+          _ShimmerBlock(height: 82, width: double.infinity),
+          SizedBox(height: 9),
+          _ShimmerBlock(height: 82, width: double.infinity),
         ],
       ),
     );

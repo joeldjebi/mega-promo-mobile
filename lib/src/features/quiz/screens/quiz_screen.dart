@@ -14,8 +14,13 @@ import '../providers/quiz_providers.dart';
 
 class QuizScreen extends ConsumerWidget {
   final String contestId;
+  final String participationId;
 
-  const QuizScreen({super.key, required this.contestId});
+  const QuizScreen({
+    super.key,
+    required this.contestId,
+    required this.participationId,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -36,12 +41,27 @@ class QuizScreen extends ConsumerWidget {
       );
     }
 
+    if (detailData != null &&
+        detailData.hasParticipated &&
+        participationId.isEmpty) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: _QuizAlreadyStarted(
+          onBack: () => context.go('/contests/$contestId'),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: questions.when(
         data: (items) => items.isEmpty
             ? const _EmptyQuiz()
-            : _QuizRunner(contestId: contestId, questions: items),
+            : _QuizRunner(
+                contestId: contestId,
+                participationId: participationId,
+                questions: items,
+              ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stackTrace) => const _EmptyQuiz(),
       ),
@@ -83,11 +103,53 @@ class _QuizAccessDenied extends StatelessWidget {
   }
 }
 
+class _QuizAlreadyStarted extends StatelessWidget {
+  final VoidCallback onBack;
+
+  const _QuizAlreadyStarted({required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: AppCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.lock_clock_rounded,
+                color: AppColors.gold,
+                size: 42,
+              ),
+              const SizedBox(height: 14),
+              Text('Participation déjà lancée', style: AppTextStyles.h2),
+              const SizedBox(height: 8),
+              Text(
+                'Tu as déjà ouvert ce quiz. Pour garantir l’équité, une participation commencée ne peut pas être relancée.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySecondary,
+              ),
+              const SizedBox(height: 20),
+              AppButton(text: 'Retour au concours', onPressed: onBack),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _QuizRunner extends StatefulWidget {
   final String contestId;
+  final String participationId;
   final List<QuizQuestion> questions;
 
-  const _QuizRunner({required this.contestId, required this.questions});
+  const _QuizRunner({
+    required this.contestId,
+    required this.participationId,
+    required this.questions,
+  });
 
   @override
   State<_QuizRunner> createState() => _QuizRunnerState();
@@ -154,7 +216,11 @@ class _QuizRunnerState extends State<_QuizRunner> {
     if (_index == widget.questions.length - 1) {
       context.go(
         '/contests/${widget.contestId}/quiz/result',
-        extra: {'questions': widget.questions, 'answers': _answers},
+        extra: {
+          'participationId': widget.participationId,
+          'questions': widget.questions,
+          'answers': _answers,
+        },
       );
       return;
     }
@@ -165,67 +231,97 @@ class _QuizRunnerState extends State<_QuizRunner> {
   @override
   Widget build(BuildContext context) {
     final progress = (_index + 1) / widget.questions.length;
+    final isLastQuestion = _index == widget.questions.length - 1;
+    final questionDuration = _question.timeLimit <= 0
+        ? 30
+        : _question.timeLimit;
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 18, 24, 18),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Question ${_index + 1}/${widget.questions.length}',
-              style: AppTextStyles.label,
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Question ${_index + 1}/${widget.questions.length}',
+                        style: AppTextStyles.label,
+                      ),
+                      const SizedBox(height: 10),
+                      LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 7,
+                        backgroundColor: AppColors.surfaceElevated,
+                        color: AppColors.primary,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                SizedBox(
+                  width: 58,
+                  height: 58,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CircularProgressIndicator(
+                        value: _remaining / questionDuration,
+                        strokeWidth: 6,
+                        backgroundColor: AppColors.surfaceElevated,
+                        color: _remaining < 10
+                            ? AppColors.accentRed
+                            : AppColors.primaryLight,
+                      ),
+                      Center(
+                        child: Text('$_remaining', style: AppTextStyles.h3),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            LinearProgressIndicator(
-              value: progress,
-              minHeight: 7,
-              backgroundColor: AppColors.surfaceElevated,
-              color: AppColors.primary,
-            ),
-            const SizedBox(height: 26),
-            Center(
-              child: SizedBox(
-                width: 88,
-                height: 88,
-                child: Stack(
-                  fit: StackFit.expand,
+            const SizedBox(height: 14),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    CircularProgressIndicator(
-                      value:
-                          _remaining /
-                          (_question.timeLimit <= 0 ? 30 : _question.timeLimit),
-                      strokeWidth: 7,
-                      backgroundColor: AppColors.surfaceElevated,
-                      color: _remaining < 10
-                          ? AppColors.accentRed
-                          : AppColors.primaryLight,
+                    AppCard(
+                      padding: const EdgeInsets.all(16),
+                      borderRadius: 18,
+                      child: Text(
+                        _question.questionText,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.h2.copyWith(height: 1.35),
+                      ),
                     ),
-                    Center(child: Text('$_remaining', style: AppTextStyles.h2)),
+                    const SizedBox(height: 14),
+                    ...List.generate(_question.options.length, (index) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _AnswerCard(
+                          label: String.fromCharCode(65 + index),
+                          text: _question.options[index],
+                          state: _optionState(index),
+                          onTap: _locked ? null : () => _lockAnswer(index),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 28),
-            Text(
-              _question.questionText,
-              textAlign: TextAlign.center,
-              style: AppTextStyles.h2,
+            const SizedBox(height: 10),
+            AppButton(
+              text: isLastQuestion ? 'Voir le résultat' : 'Suivant',
+              onPressed: _locked ? _nextQuestion : null,
             ),
-            const SizedBox(height: 28),
-            ...List.generate(_question.options.length, (index) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _AnswerCard(
-                  label: String.fromCharCode(65 + index),
-                  text: _question.options[index],
-                  state: _optionState(index),
-                  onTap: _locked ? null : () => _lockAnswer(index),
-                ),
-              );
-            }),
-            const Spacer(),
-            if (_locked) AppButton(text: 'Suivant', onPressed: _nextQuestion),
           ],
         ),
       ),
@@ -265,21 +361,47 @@ class _AnswerCard extends StatelessWidget {
       _AnswerState.selected => AppColors.primaryLight,
       _AnswerState.correct => AppColors.accentGreen,
       _AnswerState.incorrect => AppColors.accentRed,
-      _AnswerState.normal => AppColors.surfaceBorder,
+      _AnswerState.normal => AppColors.primaryDark,
     };
 
     return AppCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       borderRadius: 16,
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.18),
-            child: Text(label, style: AppTextStyles.h3.copyWith(color: color)),
+          Container(
+            alignment: Alignment.center,
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.32),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Text(
+              label,
+              style: AppTextStyles.h3.copyWith(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ),
-          const SizedBox(width: 14),
-          Expanded(child: Text(text, style: AppTextStyles.body)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(text, style: AppTextStyles.body.copyWith(height: 1.35)),
+          ),
         ],
       ),
     );

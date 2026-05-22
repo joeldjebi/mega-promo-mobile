@@ -13,6 +13,7 @@ import '../features/contests/screens/contest_detail_screen.dart';
 import '../features/contests/screens/contests_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/leaderboard/screens/leaderboard_screen.dart';
+import '../features/live_quiz/screens/live_quiz_waiting_screen.dart';
 import '../features/main/screens/main_shell.dart';
 import '../features/notifications/screens/notifications_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
@@ -99,8 +100,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/contests/:id/quiz',
-        builder: (context, state) =>
-            QuizScreen(contestId: state.pathParameters['id'] ?? ''),
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return QuizScreen(
+            contestId: state.pathParameters['id'] ?? '',
+            participationId: extra['participationId'] as String? ?? '',
+          );
+        },
+      ),
+      GoRoute(
+        path: '/contests/:id/live-waiting',
+        builder: (context, state) => LiveQuizWaitingScreen(
+          contestId: state.pathParameters['id'] ?? '',
+        ),
       ),
       GoRoute(
         path: '/contests/:id/quiz/result',
@@ -108,6 +120,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
           return QuizResultScreen(
             contestId: state.pathParameters['id'] ?? '',
+            participationId: extra['participationId'] as String? ?? '',
             questions: extra['questions'] as List<QuizQuestion>? ?? const [],
             answers: extra['answers'] as List<QuizAnswer>? ?? const [],
           );

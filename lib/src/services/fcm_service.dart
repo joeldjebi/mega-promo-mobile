@@ -306,6 +306,10 @@ class FcmService {
         data['contest_id'] as String? ?? data['contestId'] as String?;
 
     if (contestId != null && contestId.isNotEmpty) {
+      if (type == 'live_quiz_waiting' || type == 'live_quiz_reminder') {
+        context.go('/contests/$contestId/live-waiting');
+        return;
+      }
       context.go('/contests/$contestId');
       return;
     }

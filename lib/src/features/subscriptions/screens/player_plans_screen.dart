@@ -9,9 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/player_subscription_provider.dart';
 
-const _paymentProofPhone = '+225 0758754662';
-const _wavePaymentBaseUrl =
-    'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/';
+const _wavePaymentBaseUrl = 'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/';
 
 class PlayerPlansScreen extends ConsumerWidget {
   const PlayerPlansScreen({super.key});
@@ -45,9 +43,7 @@ class PlayerPlansScreen extends ConsumerWidget {
                 _CurrentSubscriptionCard(
                   subscription: data.currentSubscription,
                 ),
-                const SizedBox(height: 20),
-                const _OfflinePaymentInfoCard(),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Text('Choisir un forfait', style: AppTextStyles.h2),
                 const SizedBox(height: 12),
                 ...data.plans.map(
@@ -56,10 +52,12 @@ class PlayerPlansScreen extends ConsumerWidget {
                     child: _PlanCard(
                       plan: plan,
                       currentSubscription: data.currentSubscription,
+                      paymentMethods: data.paymentMethods,
                       onSubscribe: () => _confirmSubscription(
                         context,
                         ref,
                         plan,
+                        data.paymentMethods,
                       ),
                     ),
                   ),
@@ -107,49 +105,6 @@ class PlayerPlansScreen extends ConsumerWidget {
   }
 }
 
-class _OfflinePaymentInfoCard extends StatelessWidget {
-  const _OfflinePaymentInfoCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.info_outline_rounded,
-              color: AppColors.primary,
-              size: 21,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Paiement hors système', style: AppTextStyles.h3),
-                const SizedBox(height: 5),
-                Text(
-                  'Veuillez payer 3virgules avec Wave. Après paiement, envoie la preuve au $_paymentProofPhone. MegaPromo vérifiera puis le Super Admin activera ton forfait.',
-                  style: AppTextStyles.bodySecondary,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _CurrentSubscriptionCard extends StatelessWidget {
   final PlayerSubscription? subscription;
 
@@ -164,12 +119,12 @@ class _CurrentSubscriptionCard extends StatelessWidget {
         : subscription!.planName;
 
     return AppCard(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(13),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: (isPending ? AppColors.gold : AppColors.primary)
                   .withValues(alpha: 0.14),
@@ -182,20 +137,22 @@ class _CurrentSubscriptionCard extends StatelessWidget {
               color: isPending ? AppColors.gold : AppColors.primary,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: AppTextStyles.h3),
-                const SizedBox(height: 4),
+                Text(title, style: AppTextStyles.h3.copyWith(fontSize: 14)),
+                const SizedBox(height: 3),
                 Text(
                   subscription == null
                       ? 'Sélectionne un forfait pour obtenir plus d’avantages.'
                       : isPending
-                      ? 'En attente : paie avec Wave puis envoie la preuve au $_paymentProofPhone.'
+                      ? 'En attente de validation du paiement.'
                       : 'Valide jusqu’au ${_formatDate(subscription!.expiresAt)}.',
-                  style: AppTextStyles.bodySecondary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
                 ),
               ],
             ),
@@ -209,11 +166,13 @@ class _CurrentSubscriptionCard extends StatelessWidget {
 class _PlanCard extends StatelessWidget {
   final PlayerPlan plan;
   final PlayerSubscription? currentSubscription;
+  final List<PaymentMethodOption> paymentMethods;
   final VoidCallback onSubscribe;
 
   const _PlanCard({
     required this.plan,
     required this.currentSubscription,
+    required this.paymentMethods,
     required this.onSubscribe,
   });
 
@@ -227,7 +186,7 @@ class _PlanCard extends StatelessWidget {
         currentSubscription?.status == 'pending';
 
     return AppCard(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -238,23 +197,31 @@ class _PlanCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(plan.name, style: AppTextStyles.h2),
-                    const SizedBox(height: 5),
-                    Text(plan.description, style: AppTextStyles.bodySecondary),
+                    Text(
+                      plan.name,
+                      style: AppTextStyles.h2.copyWith(fontSize: 18),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      plan.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Text(
                 plan.price == 0 ? 'Gratuit' : '${plan.price} FCFA',
-                style: AppTextStyles.price,
+                style: AppTextStyles.price.copyWith(fontSize: 17),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               _PlanMetric(
                 icon: Icons.confirmation_number_rounded,
@@ -271,24 +238,27 @@ class _PlanCard extends StatelessWidget {
             ],
           ),
           if (plan.benefits.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            ...plan.benefits.take(4).map(
+            const SizedBox(height: 10),
+            ...plan.benefits
+                .take(4)
+                .map(
                   (benefit) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Icon(
                           Icons.check_circle_rounded,
                           color: AppColors.accentGreen,
-                          size: 18,
+                          size: 16,
                         ),
-                        const SizedBox(width: 9),
+                        const SizedBox(width: 7),
                         Expanded(
                           child: Text(
                             benefit.label,
                             style: AppTextStyles.bodySecondary.copyWith(
                               color: AppColors.textPrimary,
+                              fontSize: 12,
                             ),
                           ),
                         ),
@@ -297,7 +267,7 @@ class _PlanCard extends StatelessWidget {
                   ),
                 ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           AppButton(
             text: isCurrent
                 ? 'Forfait actif'
@@ -312,6 +282,7 @@ class _PlanCard extends StatelessWidget {
                 ? Icons.pending_rounded
                 : Icons.workspace_premium_rounded,
             isOutlined: isCurrent || hasPending,
+            height: 48,
             onPressed: isCurrent || hasPending ? null : onSubscribe,
           ),
         ],
@@ -329,7 +300,7 @@ class _PlanMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(999),
@@ -339,8 +310,8 @@ class _PlanMetric extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: AppColors.primary, size: 15),
-          const SizedBox(width: 6),
-          Text(label, style: AppTextStyles.bodySmall),
+          const SizedBox(width: 5),
+          Text(label, style: AppTextStyles.bodySmall.copyWith(fontSize: 10.5)),
         ],
       ),
     );
@@ -351,14 +322,90 @@ Future<void> _confirmSubscription(
   BuildContext context,
   WidgetRef ref,
   PlayerPlan plan,
+  List<PaymentMethodOption> paymentMethods,
 ) async {
-  final confirmed = await showModalBottomSheet<bool>(
+  final result = await showModalBottomSheet<Object?>(
     context: context,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (context) {
+      return _SubscriptionConfirmationSheet(
+        plan: plan,
+        paymentMethods: paymentMethods,
+      );
+    },
+  );
+
+  if (!context.mounted) return;
+  if (result == null) return;
+
+  final selectedPaymentMethod = result is PaymentMethodOption ? result : null;
+  if (plan.price > 0 && selectedPaymentMethod == null) return;
+
+  try {
+    await subscribeToPlayerPlan(ref, plan, selectedPaymentMethod);
+    if (!context.mounted) return;
+
+    var paymentLinkOpened = true;
+    if (plan.price > 0 && selectedPaymentMethod != null) {
+      paymentLinkOpened = await _openPayment(selectedPaymentMethod, plan.price);
+      if (!context.mounted) return;
+    }
+
+    final proofPhone = selectedPaymentMethod?.proofPhone;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          plan.price == 0
+              ? 'Forfait activé.'
+              : paymentLinkOpened
+              ? 'Paiement en attente. Envoie la preuve${proofPhone?.isNotEmpty == true ? ' au $proofPhone' : ''}.'
+              : 'Souscription créée, mais le lien de paiement ne s’est pas ouvert.',
+        ),
+      ),
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Souscription impossible : $error')));
+  }
+}
+
+class _SubscriptionConfirmationSheet extends StatefulWidget {
+  final PlayerPlan plan;
+  final List<PaymentMethodOption> paymentMethods;
+
+  const _SubscriptionConfirmationSheet({
+    required this.plan,
+    required this.paymentMethods,
+  });
+
+  @override
+  State<_SubscriptionConfirmationSheet> createState() =>
+      _SubscriptionConfirmationSheetState();
+}
+
+class _SubscriptionConfirmationSheetState
+    extends State<_SubscriptionConfirmationSheet> {
+  PaymentMethodOption? _selectedMethod;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedMethod = widget.paymentMethods.isEmpty
+        ? null
+        : widget.paymentMethods.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = widget.plan;
+    final selectedMethod = _selectedMethod;
+
+    if (plan.price == 0) {
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(22, 18, 22, 24),
@@ -366,104 +413,241 @@ Future<void> _confirmSubscription(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceBorder,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
+              const _SheetHandle(),
+              const SizedBox(height: 16),
+              Text(
+                'Activer ${plan.name}',
+                style: AppTextStyles.h2.copyWith(fontSize: 18),
               ),
-              const SizedBox(height: 18),
-              Text('Confirmer la souscription', style: AppTextStyles.h2),
               const SizedBox(height: 8),
               Text(
-                plan.price == 0
-                    ? 'Activer le forfait ${plan.name}.'
-                    : 'Tu vas créer une demande de souscription au forfait ${plan.name}. Ensuite, le lien Wave de 3virgules va s’ouvrir pour payer ${plan.price} FCFA. Après paiement, envoie la preuve au $_paymentProofPhone. Le Super Admin validera ton abonnement après vérification.',
-                style: AppTextStyles.bodySecondary,
+                'Ce forfait gratuit sera activé immédiatement.',
+                style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
               ),
-              if (plan.price > 0) ...[
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.surfaceBorder),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _PaymentStep(
-                        icon: Icons.open_in_new_rounded,
-                        text:
-                            'Clique sur Confirmer pour payer 3virgules avec Wave.',
-                      ),
-                      SizedBox(height: 8),
-                      _PaymentStep(
-                        icon: Icons.receipt_long_rounded,
-                        text: 'Fais une capture ou garde le reçu de paiement.',
-                      ),
-                      SizedBox(height: 8),
-                      _PaymentStep(
-                        icon: Icons.send_rounded,
-                        text:
-                            'Envoie la preuve au $_paymentProofPhone pour validation.',
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 18),
+              const SizedBox(height: 16),
               AppButton(
-                text: plan.price == 0 ? 'Activer' : 'Confirmer et payer',
+                text: 'Activer',
                 icon: Icons.check_rounded,
+                height: 50,
                 onPressed: () => Navigator.of(context).pop(true),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               AppButton(
                 text: 'Annuler',
                 isGhost: true,
-                onPressed: () => Navigator.of(context).pop(false),
+                height: 44,
+                onPressed: () => Navigator.of(context).pop(),
               ),
             ],
           ),
         ),
       );
-    },
-  );
-
-  if (confirmed != true || !context.mounted) return;
-
-  try {
-    await subscribeToPlayerPlan(ref, plan);
-    if (!context.mounted) return;
-
-    var paymentLinkOpened = true;
-    if (plan.price > 0) {
-      paymentLinkOpened = await _openWavePayment(plan.price);
-      if (!context.mounted) return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          plan.price == 0
-              ? 'Forfait activé.'
-              : paymentLinkOpened
-              ? 'Paiement en attente. Envoie la preuve au $_paymentProofPhone.'
-              : 'Souscription créée, mais le lien Wave ne s’est pas ouvert.',
+    if (widget.paymentMethods.isEmpty) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 18, 22, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _SheetHandle(),
+              const SizedBox(height: 16),
+              const Icon(
+                Icons.payment_rounded,
+                color: AppColors.textHint,
+                size: 36,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Paiement indisponible',
+                style: AppTextStyles.h2.copyWith(fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Aucun opérateur de paiement actif pour le moment.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              AppButton(
+                text: 'Fermer',
+                isOutlined: true,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: constraints.maxHeight),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(22, 18, 22, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SheetHandle(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Choisir un opérateur',
+                    style: AppTextStyles.h2.copyWith(fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sélectionne comment payer ${plan.name}. Après paiement, envoie la preuve pour validation.',
+                    style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  ...widget.paymentMethods.map(
+                    (method) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _PaymentMethodTile(
+                        method: method,
+                        isSelected: selectedMethod?.id == method.id,
+                        onTap: () => setState(() => _selectedMethod = method),
+                      ),
+                    ),
+                  ),
+                  if (selectedMethod != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceElevated,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.surfaceBorder),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _PaymentStep(
+                            icon: Icons.info_outline_rounded,
+                            text: selectedMethod.instructions.isEmpty
+                                ? 'Paie avec ${selectedMethod.name}, puis envoie la preuve.'
+                                : selectedMethod.instructions,
+                          ),
+                          if (selectedMethod.proofPhone.isNotEmpty) ...[
+                            const SizedBox(height: 7),
+                            _PaymentStep(
+                              icon: Icons.send_rounded,
+                              text:
+                                  'Preuve à envoyer au ${selectedMethod.proofPhone}.',
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  AppButton(
+                    text: selectedMethod == null
+                        ? 'Choisis un opérateur'
+                        : 'Payer avec ${selectedMethod.name}',
+                    icon: Icons.check_rounded,
+                    height: 50,
+                    onPressed: selectedMethod == null
+                        ? null
+                        : () => Navigator.of(context).pop(selectedMethod),
+                  ),
+                  const SizedBox(height: 8),
+                  AppButton(
+                    text: 'Annuler',
+                    isGhost: true,
+                    height: 44,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 42,
+        height: 4,
+        decoration: BoxDecoration(
+          color: AppColors.surfaceBorder,
+          borderRadius: BorderRadius.circular(999),
         ),
       ),
     );
-  } catch (error) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Souscription impossible : $error')),
+  }
+}
+
+class _PaymentMethodTile extends StatelessWidget {
+  final PaymentMethodOption method;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _PaymentMethodTile({
+    required this.method,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.primary.withValues(alpha: 0.10)
+              : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : AppColors.surfaceBorder,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              color: isSelected ? AppColors.primary : AppColors.textHint,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    method.name,
+                    style: AppTextStyles.h3.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    method.country,
+                    style: AppTextStyles.bodySmall.copyWith(fontSize: 10.5),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -494,8 +678,16 @@ class _PaymentStep extends StatelessWidget {
   }
 }
 
-Future<bool> _openWavePayment(int amount) async {
-  final uri = Uri.parse('$_wavePaymentBaseUrl?amount=$amount');
+Future<bool> _openPayment(PaymentMethodOption method, int amount) async {
+  final baseUrl = method.paymentUrl.isNotEmpty
+      ? method.paymentUrl
+      : _wavePaymentBaseUrl;
+  final uri = Uri.parse(baseUrl).replace(
+    queryParameters: {
+      ...Uri.parse(baseUrl).queryParameters,
+      'amount': '$amount',
+    },
+  );
   return launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 

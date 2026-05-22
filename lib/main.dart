@@ -11,11 +11,13 @@ import 'src/config/router.dart';
 import 'src/features/auth/providers/auth_provider.dart';
 import 'src/services/device_telemetry_service.dart';
 import 'src/services/fcm_service.dart';
+import 'src/services/live_quiz_notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final firebaseReady = await _initializeFirebase();
   await Supabase.initialize(url: kSupabaseUrl, anonKey: kSupabaseAnonKey);
+  await LiveQuizNotificationService.initialize();
   DeviceTelemetryService.initialize();
   if (firebaseReady) {
     unawaited(FcmService.initialize());

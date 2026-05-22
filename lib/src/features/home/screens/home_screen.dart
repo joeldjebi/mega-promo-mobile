@@ -26,6 +26,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final profile = ref.watch(userProfileProvider);
     final contests = ref.watch(contestsProvider);
+    final participatedContestIds =
+        ref.watch(userParticipatedContestIdsProvider).value ?? const <String>{};
+    final registeredLiveQuizIds =
+        ref.watch(userRegisteredLiveQuizIdsProvider).value ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
 
     return Scaffold(
@@ -34,6 +38,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: RefreshIndicator(
           onRefresh: () async {
             ref.invalidate(userProfileProvider);
+            ref.invalidate(userParticipatedContestIdsProvider);
+            ref.invalidate(userRegisteredLiveQuizIdsProvider);
             ref.read(contestsShuffleSeedProvider.notifier).refresh();
             final refreshedContests = ref.refresh(contestsProvider.future);
             await refreshedContests;
@@ -61,18 +67,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             .toList();
                   if (filtered.isEmpty) return const _EmptyContestsState();
 
+                  final liveQuizzes = filtered
+                      .where((contest) => contest.isLiveVisibleOnHome)
+                      .toList()
+                    ..sort((a, b) {
+                      final rankCompare = _liveQuizHomeRank(
+                        a,
+                      ).compareTo(_liveQuizHomeRank(b));
+                      if (rankCompare != 0) return rankCompare;
+                      if (a.isLiveEnded && b.isLiveEnded) {
+                        return b.endsAt.compareTo(a.endsAt);
+                      }
+                      final aDate = a.liveStartsAt ?? a.startsAt ?? a.endsAt;
+                      final bDate = b.liveStartsAt ?? b.startsAt ?? b.endsAt;
+                      return aDate.compareTo(bDate);
+                    });
                   final boosted = shuffleContestsForSession(
-                    filtered.where((contest) => contest.isBoosted),
+                    filtered.where(
+                      (contest) => contest.isBoosted && !contest.isLive,
+                    ),
                     shuffleSeed,
                   ).take(5).toList();
                   final allContests = shuffleContestsForSession(
-                    filtered,
+                    filtered.where((contest) => !contest.isLive),
                     shuffleSeed,
                   );
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (liveQuizzes.isNotEmpty) ...[
+                        Text('QUIZ LIVE', style: AppTextStyles.label),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 194,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            clipBehavior: Clip.none,
+                            itemCount: liveQuizzes.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) {
+                              final contest = liveQuizzes[index];
+                              return SizedBox(
+                                width: 318,
+                                child: _LiveQuizCard(
+                                  contest: contest,
+                                  hasParticipated: participatedContestIds
+                                      .contains(contest.id),
+                                  isRegistered: registeredLiveQuizIds.contains(
+                                    contest.id,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       if (boosted.isNotEmpty) ...[
                         Text('EN VEDETTE', style: AppTextStyles.label),
                         const SizedBox(height: 10),
@@ -87,6 +139,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             itemBuilder: (context, index) {
                               return _FeaturedContestCard(
                                 contest: boosted[index],
+                                hasParticipated: participatedContestIds
+                                    .contains(boosted[index].id),
                               );
                             },
                           ),
@@ -100,7 +154,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           .map(
                             (contest) => Padding(
                               padding: const EdgeInsets.only(bottom: 9),
-                              child: _CompactContestCard(contest: contest),
+                              child: _CompactContestCard(
+                                contest: contest,
+                                hasParticipated: participatedContestIds
+                                    .contains(contest.id),
+                              ),
                             ),
                           ),
                       if (allContests.length > 10) ...[
@@ -206,8 +264,12 @@ class _ContestFilters extends StatelessWidget {
 
 class _FeaturedContestCard extends StatelessWidget {
   final Contest contest;
+  final bool hasParticipated;
 
-  const _FeaturedContestCard({required this.contest});
+  const _FeaturedContestCard({
+    required this.contest,
+    required this.hasParticipated,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -237,7 +299,10 @@ class _FeaturedContestCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const _SponsoredBadge(),
+                if (hasParticipated)
+                  const _ParticipatedBadge()
+                else
+                  const _SponsoredBadge(),
                 const SizedBox(width: 6),
                 if (contest.brandLogoUrl?.isNotEmpty == true) ...[
                   _BrandLogo(url: contest.brandLogoUrl!, size: 26),
@@ -325,7 +390,7 @@ class _FeaturedContestCard extends StatelessWidget {
                 ),
                 child: Center(
                   child: Text(
-                    'Participer',
+                    hasParticipated ? 'Déjà joué' : 'Participer',
                     style: AppTextStyles.button.copyWith(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w800,
@@ -336,6 +401,292 @@ class _FeaturedContestCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+int _liveQuizHomeRank(Contest contest) {
+  if (contest.isLiveActiveNow) return 0;
+  if (contest.isLiveEnded) return 2;
+  return 1;
+}
+
+class _LiveQuizCard extends StatelessWidget {
+  final Contest contest;
+  final bool hasParticipated;
+  final bool isRegistered;
+
+  const _LiveQuizCard({
+    required this.contest,
+    required this.hasParticipated,
+    required this.isRegistered,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final liveStartsAt = contest.liveStartsAt;
+    final isEnded = contest.isLiveEnded;
+    final isActiveNow = contest.isLiveActiveNow;
+    final startsLabel = liveStartsAt == null
+        ? 'Heure à confirmer'
+        : '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
+              '${liveStartsAt.minute.toString().padLeft(2, '0')}';
+
+    return InkWell(
+      onTap: isEnded ? null : () => context.push('/contests/${contest.id}'),
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isEnded
+                ? [
+                    AppColors.surface.withValues(alpha: 0.78),
+                    AppColors.surface.withValues(alpha: 0.72),
+                    AppColors.surfaceElevated.withValues(alpha: 0.64),
+                  ]
+                : [
+                    AppColors.primary.withValues(alpha: 0.26),
+                    AppColors.surface,
+                    AppColors.surfaceElevated,
+                  ],
+          ),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: isEnded
+                ? AppColors.surfaceBorder.withValues(alpha: 0.7)
+                : AppColors.primaryLight.withValues(alpha: 0.32),
+          ),
+          boxShadow: isEnded
+              ? const []
+              : [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.16),
+                    blurRadius: 22,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isEnded
+                        ? AppColors.textHint.withValues(alpha: 0.12)
+                        : Colors.redAccent.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: isEnded
+                          ? AppColors.textHint.withValues(alpha: 0.22)
+                          : Colors.redAccent.withValues(alpha: 0.38),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: isEnded
+                              ? AppColors.textHint
+                              : isActiveNow
+                              ? AppColors.accentGreen
+                              : Colors.redAccent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isEnded
+                            ? 'TERMINÉ'
+                            : isActiveNow
+                            ? 'EN DIRECT'
+                            : 'LIVE',
+                        style: AppTextStyles.label.copyWith(
+                          color: isEnded
+                              ? AppColors.textSecondary
+                              : isActiveNow
+                              ? AppColors.accentGreen
+                              : Colors.redAccent,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (isRegistered)
+                  const _LiveRegisteredBadge()
+                else if (hasParticipated)
+                  const _ParticipatedBadge(compact: true)
+                else
+                  _CategoryBadge(label: contest.type.filterLabel),
+                const Spacer(),
+                Text(
+                  startsLabel,
+                  style: AppTextStyles.h3.copyWith(
+                    color: isEnded
+                        ? AppColors.textSecondary
+                        : AppColors.primaryLight,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: AppColors.background.withValues(alpha: 0.34),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: isEnded
+                          ? AppColors.textHint.withValues(alpha: 0.2)
+                          : AppColors.primaryLight.withValues(alpha: 0.28),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.bolt_rounded,
+                    color: isEnded
+                        ? AppColors.textHint
+                        : AppColors.primaryLight,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        contest.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.h2.copyWith(
+                          color: isEnded
+                              ? AppColors.textSecondary
+                              : AppColors.textPrimary,
+                          fontSize: 17,
+                          height: 1.15,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${_formatPrize(contest.prizeValue)} · ${contest.registeredCount} inscrit(s)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySecondary.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.background.withValues(alpha: 0.24),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.surfaceBorder),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.timer_rounded,
+                    color: AppColors.gold,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: isEnded
+                        ? Text(
+                            'Quiz terminé · visible 24h',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          )
+                        : liveStartsAt == null
+                        ? Text('Départ bientôt', style: AppTextStyles.bodySmall)
+                        : ContestTimer(
+                            endsAt: liveStartsAt,
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isEnded
+                        ? 'Fermé'
+                        : isRegistered
+                        ? 'Entrer'
+                        : 'S’inscrire',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: isEnded
+                          ? AppColors.textSecondary
+                          : AppColors.primaryLight,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LiveRegisteredBadge extends StatelessWidget {
+  const _LiveRegisteredBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.accentGreen.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: AppColors.accentGreen.withValues(alpha: 0.34),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            color: AppColors.accentGreen,
+            size: 13,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            'Inscrit',
+            style: AppTextStyles.label.copyWith(
+              color: AppColors.accentGreen,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -405,13 +756,34 @@ class _BrandLogo extends StatelessWidget {
   }
 }
 
-class _CompactContestCard extends StatelessWidget {
+class _CompactContestCard extends ConsumerWidget {
   final Contest contest;
+  final bool hasParticipated;
 
-  const _CompactContestCard({required this.contest});
+  const _CompactContestCard({
+    required this.contest,
+    required this.hasParticipated,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final participantsCount =
+        ref.watch(contestParticipantsCountProvider(contest.id)).value ?? 0;
+    final hasLimit = contest.maxParticipants > 0;
+    final now = DateTime.now();
+    final startsAt = contest.startsAt ?? now;
+    final totalDuration = contest.endsAt.difference(startsAt).inSeconds;
+    final elapsedDuration = now.difference(startsAt).inSeconds;
+    final timeProgress = totalDuration <= 0
+        ? 1.0
+        : (elapsedDuration / totalDuration).clamp(0.0, 1.0);
+    final progress = hasLimit
+        ? (participantsCount / contest.maxParticipants).clamp(0.0, 1.0)
+        : timeProgress;
+    final progressLabel = hasLimit
+        ? '$participantsCount / ${contest.maxParticipants} joueurs'
+        : '$participantsCount participant${participantsCount > 1 ? 's' : ''}';
+
     return AppCard(
       onTap: () => context.push('/contests/${contest.id}'),
       padding: const EdgeInsets.all(13),
@@ -474,7 +846,10 @@ class _CompactContestCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _CategoryBadge(label: contest.type.filterLabel),
+                  if (hasParticipated)
+                    const _ParticipatedBadge(compact: true)
+                  else
+                    _CategoryBadge(label: contest.type.filterLabel),
                   const SizedBox(height: 8),
                   ContestTimer(endsAt: contest.endsAt),
                 ],
@@ -482,10 +857,31 @@ class _CompactContestCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 9),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  hasLimit ? 'Places prises' : 'Temps écoulé',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textHint,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                progressLabel,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
-              value: 0.30,
+              value: progress,
               minHeight: 3,
               backgroundColor: AppColors.separator,
               valueColor: AlwaysStoppedAnimation<Color>(contest.type.color),
@@ -523,6 +919,49 @@ class _SponsoredBadge extends StatelessWidget {
               fontSize: 10.5,
               color: AppColors.primaryLight,
               fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ParticipatedBadge extends StatelessWidget {
+  final bool compact;
+
+  const _ParticipatedBadge({this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 8,
+        vertical: compact ? 4 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.accentGreen.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: AppColors.accentGreen.withValues(alpha: 0.32),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            color: AppColors.accentGreen,
+            size: compact ? 11 : 12,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Déjà joué',
+            style: AppTextStyles.bodySmall.copyWith(
+              fontSize: compact ? 10 : 10.5,
+              color: AppColors.accentGreen,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],

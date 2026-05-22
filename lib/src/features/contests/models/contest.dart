@@ -62,6 +62,7 @@ class Contest {
   final String? brandLogoUrl;
   final String? brandName;
   final ContestType type;
+  final String status;
   final String? categoryId;
   final String category;
   final Category? categoryData;
@@ -75,6 +76,12 @@ class Contest {
   final int viewsCount;
   final int sharesCount;
   final List<String> allowedPlayerPlanKeys;
+  final bool isLive;
+  final DateTime? liveStartsAt;
+  final String liveStatus;
+  final int registeredCount;
+  final int connectedCount;
+  final int currentQuestionIndex;
 
   const Contest({
     required this.id,
@@ -84,6 +91,7 @@ class Contest {
     required this.brandLogoUrl,
     required this.brandName,
     required this.type,
+    required this.status,
     required this.categoryId,
     required this.category,
     required this.categoryData,
@@ -97,6 +105,12 @@ class Contest {
     required this.viewsCount,
     required this.sharesCount,
     required this.allowedPlayerPlanKeys,
+    required this.isLive,
+    required this.liveStartsAt,
+    required this.liveStatus,
+    required this.registeredCount,
+    required this.connectedCount,
+    required this.currentQuestionIndex,
   });
 
   factory Contest.fromJson(Map<String, dynamic> json) {
@@ -108,6 +122,7 @@ class Contest {
       brandLogoUrl: json['brand_logo_url'] as String?,
       brandName: json['brand_name'] as String?,
       type: ContestType.fromValue(json['type'] as String?),
+      status: json['status'] as String? ?? 'active',
       categoryId: json['category_id'] as String?,
       category: _categoryName(json),
       categoryData: Category.fromEmbeddedJson(json['categories']),
@@ -122,6 +137,13 @@ class Contest {
       viewsCount: (json['views_count'] as num?)?.toInt() ?? 0,
       sharesCount: (json['shares_count'] as num?)?.toInt() ?? 0,
       allowedPlayerPlanKeys: _allowedPlanKeys(json['allowed_player_plan_keys']),
+      isLive: json['is_live'] as bool? ?? false,
+      liveStartsAt: DateTime.tryParse(json['live_starts_at'] as String? ?? ''),
+      liveStatus: json['live_status'] as String? ?? 'scheduled',
+      registeredCount: (json['registered_count'] as num?)?.toInt() ?? 0,
+      connectedCount: (json['connected_count'] as num?)?.toInt() ?? 0,
+      currentQuestionIndex:
+          (json['current_question_index'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -134,6 +156,7 @@ class Contest {
       brandLogoUrl: brandLogoUrl,
       brandName: brandName,
       type: type,
+      status: status,
       categoryId: categoryId,
       category: category?.name ?? this.category,
       categoryData: category ?? categoryData,
@@ -147,6 +170,12 @@ class Contest {
       viewsCount: viewsCount,
       sharesCount: sharesCount,
       allowedPlayerPlanKeys: allowedPlayerPlanKeys,
+      isLive: isLive,
+      liveStartsAt: liveStartsAt,
+      liveStatus: liveStatus,
+      registeredCount: registeredCount,
+      connectedCount: connectedCount,
+      currentQuestionIndex: currentQuestionIndex,
     );
   }
 
@@ -159,6 +188,7 @@ class Contest {
       brandLogoUrl: brandLogoUrl,
       brandName: brandName,
       type: type,
+      status: status,
       categoryId: categoryId,
       category: category,
       categoryData: categoryData,
@@ -172,6 +202,12 @@ class Contest {
       viewsCount: viewsCount,
       sharesCount: sharesCount,
       allowedPlayerPlanKeys: allowedPlayerPlanKeys,
+      isLive: isLive,
+      liveStartsAt: liveStartsAt,
+      liveStatus: liveStatus,
+      registeredCount: registeredCount,
+      connectedCount: connectedCount,
+      currentQuestionIndex: currentQuestionIndex,
     );
   }
 
@@ -179,6 +215,37 @@ class Contest {
     if (allowedPlayerPlanKeys.isEmpty) return true;
     final normalizedPlanKey = planKey == 'standard' ? 'free' : planKey;
     return allowedPlayerPlanKeys.contains(normalizedPlanKey);
+  }
+
+  bool get isLiveEnded {
+    final normalizedStatus = liveStatus.toLowerCase();
+    final normalizedContestStatus = status.toLowerCase();
+    return isLive &&
+        (normalizedContestStatus == 'inactive' ||
+            normalizedContestStatus == 'ended' ||
+            normalizedContestStatus == 'completed' ||
+            normalizedContestStatus == 'finished' ||
+            normalizedStatus == 'ended' ||
+            normalizedStatus == 'completed' ||
+            normalizedStatus == 'finished' ||
+            endsAt.isBefore(DateTime.now()));
+  }
+
+  bool get isLiveActiveNow {
+    if (!isLive || isLiveEnded) return false;
+    final now = DateTime.now();
+    final normalizedStatus = liveStatus.toLowerCase();
+    return normalizedStatus == 'playing' ||
+        normalizedStatus == 'waiting' ||
+        (liveStartsAt != null &&
+            !now.isBefore(liveStartsAt!) &&
+            now.isBefore(endsAt));
+  }
+
+  bool get isLiveVisibleOnHome {
+    if (!isLive) return false;
+    if (!isLiveEnded) return true;
+    return endsAt.add(const Duration(hours: 24)).isAfter(DateTime.now());
   }
 
   String get accessLabel {
