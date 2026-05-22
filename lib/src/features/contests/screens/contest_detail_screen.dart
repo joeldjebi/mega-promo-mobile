@@ -211,12 +211,18 @@ class _ContestDetailBody extends ConsumerWidget {
             'register_live_quiz',
             params: {'p_contest_id': data.contest.id},
           );
-          _refreshParticipationState(ref);
-          if (!context.mounted) return;
           if (_isWaitingRoomOpen) {
+            await supabase.rpc(
+              'join_live_quiz_waiting_room',
+              params: {'p_contest_id': data.contest.id},
+            );
+            _refreshParticipationState(ref);
+            if (!context.mounted) return;
             context.go('/contests/${data.contest.id}/live-waiting');
             return;
           }
+          _refreshParticipationState(ref);
+          if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Inscription au Quiz Live validée.')),
           );
@@ -252,9 +258,10 @@ class _ContestDetailBody extends ConsumerWidget {
         );
       } catch (error) {
         if (!context.mounted) return;
+        final message = _formatLiveQuizError(error);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(message)));
       }
       return;
     }
@@ -536,6 +543,13 @@ class _ContestDetailBody extends ConsumerWidget {
                       ),
                     ),
                   ],
+                  if (data.userRanking != null) ...[
+                    const SizedBox(height: 14),
+                    _ContestUserRankingCard(
+                      contestId: contest.id,
+                      ranking: data.userRanking!,
+                    ),
+                  ],
                   const SizedBox(height: 26),
                   Text('Description', style: AppTextStyles.h2),
                   const SizedBox(height: 10),
@@ -698,6 +712,93 @@ class _EndedLiveQuizDetail extends StatelessWidget {
   }
 }
 
+class _ContestUserRankingCard extends StatelessWidget {
+  final String contestId;
+  final ContestUserRanking ranking;
+
+  const _ContestUserRankingCard({
+    required this.contestId,
+    required this.ranking,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.leaderboard_rounded,
+                  color: AppColors.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Ton classement', style: AppTextStyles.h3),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${ranking.score} point${ranking.score > 1 ? 's' : ''}',
+                      style: AppTextStyles.bodySecondary,
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '#${ranking.rank}',
+                style: AppTextStyles.price.copyWith(fontSize: 22),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Tu es ${ranking.rank}${ranking.rank == 1 ? 'er' : 'e'} sur ${ranking.totalParticipants} participant${ranking.totalParticipants > 1 ? 's' : ''}.',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => context.go('/leaderboard?contestId=$contestId'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Voir tout',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DrawParticipationSheet extends ConsumerStatefulWidget {
   final ContestDetailData data;
   final WidgetRef ref;
@@ -854,6 +955,21 @@ class _DrawParticipationSheetState
 int _drawTickets(ContestDetailData data) {
   final baseTickets = data.drawSettings?.standardTickets ?? 1;
   return baseTickets + data.userProfile.bonusTickets;
+}
+
+String _formatLiveQuizError(Object error) {
+  final message = '$error';
+  if (message.contains('Les inscriptions sont fermees') ||
+      message.contains('La porte est fermee')) {
+    return 'Les inscriptions sont fermées pour ce Quiz Live.';
+  }
+  if (message.contains('salle d') || message.contains('Inscription requise')) {
+    return 'La salle d’attente n’est pas encore ouverte ou ton inscription doit être actualisée.';
+  }
+  if (message.contains('forfait')) {
+    return 'Ton forfait ne permet pas de participer à ce Quiz Live.';
+  }
+  return message;
 }
 
 class _PredictionParticipationSheet extends ConsumerStatefulWidget {
@@ -1129,39 +1245,12 @@ class _ContestHeroImage extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (hasImage)
-            _NetworkPromoImage(url: imageUrl)
+            _NetworkPromoImage(
+              url: imageUrl,
+              fallback: _ContestHeroFallback(contest: contest),
+            )
           else
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    contest.type.color.withValues(alpha: 0.32),
-                    AppColors.surface,
-                    AppColors.background,
-                  ],
-                ),
-              ),
-              child: Center(
-                child: Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.42),
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: Icon(
-                    contest.type.icon,
-                    color: contest.type.color,
-                    size: 48,
-                  ),
-                ),
-              ),
-            ),
+            _ContestHeroFallback(contest: contest),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -1184,8 +1273,9 @@ class _ContestHeroImage extends StatelessWidget {
 
 class _NetworkPromoImage extends StatelessWidget {
   final String url;
+  final Widget fallback;
 
-  const _NetworkPromoImage({required this.url});
+  const _NetworkPromoImage({required this.url, required this.fallback});
 
   bool get _isSvg {
     final cleanUrl = url.split('?').first.toLowerCase();
@@ -1231,21 +1321,57 @@ class _NetworkPromoImage extends StatelessWidget {
           fit: BoxFit.cover,
           width: constraints.maxWidth,
           height: constraints.maxHeight,
-          errorBuilder: (_, _, _) => const Center(
-            child: Icon(
-              Icons.image_not_supported_rounded,
-              color: AppColors.textHint,
-              size: 38,
-            ),
-          ),
+          errorBuilder: (_, _, _) => fallback,
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
-            return const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                fallback,
+                const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ],
             );
           },
         );
       },
+    );
+  }
+}
+
+class _ContestHeroFallback extends StatelessWidget {
+  final Contest contest;
+
+  const _ContestHeroFallback({required this.contest});
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = contest.isLive ? Icons.bolt_rounded : contest.type.icon;
+    final color = contest.isLive ? AppColors.primaryLight : contest.type.color;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withValues(alpha: 0.30),
+            AppColors.surface,
+            AppColors.background,
+          ],
+        ),
+      ),
+      child: Center(
+        child: Container(
+          width: 98,
+          height: 98,
+          decoration: BoxDecoration(
+            color: AppColors.background.withValues(alpha: 0.50),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: AppColors.surfaceBorder),
+          ),
+          child: Icon(icon, color: color, size: 52),
+        ),
+      ),
     );
   }
 }

@@ -56,3 +56,35 @@ Future<void> markNotificationAsRead(String id) async {
       .update({'is_read': true})
       .eq('id', id);
 }
+
+Future<void> markAllNotificationsAsRead() async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
+
+  await Supabase.instance.client
+      .from('notifications')
+      .update({'is_read': true})
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+}
+
+Future<void> deleteNotification(String id) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
+
+  await Supabase.instance.client
+      .from('notifications')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+}
+
+Future<void> deleteAllNotifications() async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
+
+  await Supabase.instance.client
+      .from('notifications')
+      .delete()
+      .eq('user_id', user.id);
+}

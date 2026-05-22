@@ -13,6 +13,7 @@ import '../features/contests/screens/contest_detail_screen.dart';
 import '../features/contests/screens/contests_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/leaderboard/screens/leaderboard_screen.dart';
+import '../features/legal/screens/legal_page_screen.dart';
 import '../features/live_quiz/screens/live_quiz_waiting_screen.dart';
 import '../features/main/screens/main_shell.dart';
 import '../features/notifications/screens/notifications_screen.dart';
@@ -45,6 +46,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final goingToLogin = location == '/login';
       final goingToSplash = location == '/splash';
       final goingToVerifyOtp = location == '/verify-otp';
+      final goingToLegal = location.startsWith('/legal/');
       final goingToOnboarding = location.startsWith('/onboarding');
       final goingToMainRoute =
           location == '/home' ||
@@ -58,7 +60,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       final goingToProtectedRoute = goingToMainRoute || goingToOnboarding;
       final goingToAuthRoute =
-          goingToLogin || goingToSplash || goingToVerifyOtp;
+          goingToLogin || goingToSplash || goingToVerifyOtp || goingToLegal;
 
       if (!isLogged && goingToProtectedRoute) {
         return '/login';
@@ -80,6 +82,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const SplashScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(
+        path: '/legal/:key',
+        builder: (context, state) =>
+            LegalPageScreen(pageKey: state.pathParameters['key'] ?? 'terms'),
+      ),
       GoRoute(
         path: '/verify-otp',
         builder: (context, state) =>

@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.moyoo.megapromo</string>
+	<string>com.moyoo.megapromoios</string>
 	<key>PROJECT_ID</key>
 	<string>megapromo-18c9b</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:288733119172:ios:e03155fb8f6bbe0f2cbf91</string>
+	<string>1:288733119172:ios:0c2d91c2a15456792cbf91</string>
 </dict>
 </plist>

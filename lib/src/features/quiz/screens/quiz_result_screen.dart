@@ -40,6 +40,23 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   double get _ratio =>
       widget.questions.isEmpty ? 0 : _correct / widget.questions.length;
 
+  QuizAnswer _answerAt(int index) {
+    if (index < widget.answers.length) return widget.answers[index];
+    final question = widget.questions[index];
+    return QuizAnswer(
+      questionId: question.id,
+      selectedIndex: null,
+      correctIndex: question.correctIndex,
+      isCorrect: false,
+      points: 0,
+    );
+  }
+
+  String _answerLabel(int? index) {
+    if (index == null) return 'Non répondu';
+    return String.fromCharCode(65 + index);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -126,55 +143,124 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
           children: [
-            Icon(icon, color: color, size: 92)
-                .animate()
-                .fadeIn(duration: 400.ms)
-                .scale(curve: Curves.easeOutBack),
-            const SizedBox(height: 18),
-            Text(
-              'Score final',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.h1,
+            AppCard(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              borderRadius: 18,
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.16),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(icon, color: color, size: 26),
+                          )
+                          .animate()
+                          .fadeIn(duration: 400.ms)
+                          .scale(curve: Curves.easeOutBack),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Score final', style: AppTextStyles.h3),
+                            const SizedBox(height: 2),
+                            Text(
+                              '+$_points points',
+                              style: AppTextStyles.price.copyWith(fontSize: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ResultStat(
+                          label: 'Bonnes réponses',
+                          value: '$_correct/${widget.questions.length}',
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _ResultStat(
+                          label: 'Réussite',
+                          value: '${(_ratio * 100).round()}%',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              '$_correct / ${widget.questions.length} bonnes réponses',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.h2,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '+$_points points',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.price,
-            ),
-            const SizedBox(height: 26),
-            Text('Récapitulatif', style: AppTextStyles.h2),
+            const SizedBox(height: 22),
+            Text('Réponses', style: AppTextStyles.h2),
             const SizedBox(height: 14),
             ...List.generate(widget.questions.length, (index) {
               final question = widget.questions[index];
-              final answer = widget.answers[index];
+              final answer = _answerAt(index);
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 10),
                 child: AppCard(
-                  child: Row(
+                  padding: const EdgeInsets.all(14),
+                  borderRadius: 18,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        answer.isCorrect
-                            ? Icons.check_circle_rounded
-                            : Icons.cancel_rounded,
-                        color: answer.isCorrect
-                            ? AppColors.accentGreen
-                            : AppColors.accentRed,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            answer.isCorrect
+                                ? Icons.check_circle_rounded
+                                : Icons.cancel_rounded,
+                            color: answer.isCorrect
+                                ? AppColors.accentGreen
+                                : AppColors.accentRed,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              question.questionText,
+                              style: AppTextStyles.body.copyWith(
+                                fontWeight: FontWeight.w700,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          question.questionText,
-                          style: AppTextStyles.bodySecondary,
-                        ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _AnswerPill(
+                            label: 'Ta réponse',
+                            value: _answerLabel(answer.selectedIndex),
+                            color: answer.isCorrect
+                                ? AppColors.accentGreen
+                                : AppColors.accentRed,
+                          ),
+                          _AnswerPill(
+                            label: 'Bonne réponse',
+                            value: _answerLabel(answer.correctIndex),
+                            color: AppColors.primaryLight,
+                          ),
+                          _AnswerPill(
+                            label: 'Points',
+                            value: '+${answer.points}',
+                            color: AppColors.gold,
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -196,6 +282,75 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                 correctAnswers: _correct,
                 totalQuestions: widget.questions.length,
                 points: _points,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ResultStat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ResultStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: AppTextStyles.h3),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnswerPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _AnswerPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: AppTextStyles.bodySmall,
+          children: [
+            TextSpan(text: '$label · '),
+            TextSpan(
+              text: value,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: color,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ],

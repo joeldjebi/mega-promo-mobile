@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -93,6 +94,15 @@ class _LoginScreenState extends State<LoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Spacer(),
+              Center(
+                child: Image.asset(
+                  'assets/logo/megapromologo.png',
+                  width: 82,
+                  height: 82,
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Flexible(child: Text('Bienvenue', style: AppTextStyles.h1)),
@@ -174,8 +184,36 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _hasPhone && !_isLoading ? _continue : null,
               ),
               const Spacer(flex: 2),
-              Text(
-                'En continuant, tu acceptes nos conditions d’utilisation',
+              Text.rich(
+                TextSpan(
+                  text: 'En continuant, tu acceptes nos ',
+                  children: [
+                    TextSpan(
+                      text: 'conditions générales d’utilisation',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.primaryDark,
+                        fontWeight: FontWeight.w800,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.primaryDark,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => context.push('/legal/terms'),
+                    ),
+                    const TextSpan(text: ' et notre '),
+                    TextSpan(
+                      text: 'politique de confidentialité',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.primaryDark,
+                        fontWeight: FontWeight.w800,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.primaryDark,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => context.push('/legal/privacy'),
+                    ),
+                    const TextSpan(text: '.'),
+                  ],
+                ),
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySmall,
               ),

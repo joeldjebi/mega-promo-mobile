@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,9 +36,16 @@ class FcmService {
   static String? _notificationsUserId;
 
   static Future<void> initialize() async {
-    if (Firebase.apps.isEmpty) return;
-    if (_isInitialized) return;
+    if (Firebase.apps.isEmpty) {
+      debugPrint('[FCM][init] skipped: Firebase is not initialized');
+      return;
+    }
+    if (_isInitialized) {
+      debugPrint('[FCM][init] skipped: already initialized');
+      return;
+    }
     _isInitialized = true;
+    debugPrint('[FCM][init] starting on ${defaultTargetPlatform.name}');
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
@@ -51,30 +59,46 @@ class FcmService {
   }
 
   static Future<void> syncTokenForCurrentUser() async {
-    if (Firebase.apps.isEmpty) return;
+    if (Firebase.apps.isEmpty) {
+      debugPrint('[FCM][sync] skipped: Firebase is not initialized');
+      return;
+    }
 
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
+      debugPrint('[FCM][sync] skipped: no authenticated user');
       await _stopInAppNotifications();
       return;
     }
 
     _listenInAppNotificationsForCurrentUser(user.id);
+    debugPrint('[FCM][sync] starting for user=${_idPreview(user.id)}');
 
     try {
+      if (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS) {
+        final apnsToken = await _waitForApplePushToken();
+        if (apnsToken == null) {
+          debugPrint('[FCM][sync] APNs token unavailable after retries');
+          return;
+        }
+        debugPrint('[FCM][sync] APNs token ready ${_tokenPreview(apnsToken)}');
+      }
+
       final token = await _messaging.getToken();
       if (token == null) {
-        debugPrint('[FCM] token unavailable');
+        debugPrint('[FCM][sync] FCM token unavailable');
         return;
       }
+      debugPrint('[FCM][sync] FCM token ready ${_tokenPreview(token)}');
 
       await Supabase.instance.client
           .from('users')
           .update({'fcm_token': token})
           .eq('id', user.id);
-      debugPrint('[FCM] token synced');
+      debugPrint('[FCM][sync] token synced for user=${_idPreview(user.id)}');
     } catch (error, stackTrace) {
-      debugPrint('[FCM] token sync failed: $error');
+      debugPrint('[FCM][sync] token sync failed: $error');
       debugPrint('$stackTrace');
     }
   }
@@ -86,15 +110,39 @@ class FcmService {
       sound: true,
       provisional: false,
     );
-    debugPrint('[FCM] permission: ${settings.authorizationStatus.name}');
+    debugPrint(
+      '[FCM][permission] status=${settings.authorizationStatus.name} '
+      'alert=${settings.alert.name} badge=${settings.badge.name} '
+      'sound=${settings.sound.name} announcement=${settings.announcement.name}',
+    );
   }
 
   static Future<void> _configureForegroundPresentation() async {
     await _messaging.setForegroundNotificationPresentationOptions(
-      alert: false,
+      alert: true,
       badge: true,
       sound: true,
     );
+    debugPrint('[FCM][foreground] presentation alert=true badge=true sound=true');
+  }
+
+  static Future<String?> _waitForApplePushToken() async {
+    String? token = await _messaging.getAPNSToken();
+    if (token != null) {
+      debugPrint('[FCM][apns] token available immediately');
+      return token;
+    }
+
+    for (var attempt = 0; attempt < 10; attempt += 1) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      token = await _messaging.getAPNSToken();
+      if (token != null) {
+        debugPrint('[FCM][apns] token available after ${attempt + 1} retry');
+        return token;
+      }
+    }
+
+    return null;
   }
 
   static void _listenTokenRefresh() {
@@ -104,13 +152,14 @@ class FcmService {
       if (user == null) return;
 
       try {
+        debugPrint('[FCM][refresh] token refreshed ${_tokenPreview(token)}');
         await Supabase.instance.client
             .from('users')
             .update({'fcm_token': token})
             .eq('id', user.id);
-        debugPrint('[FCM] refreshed token synced');
+        debugPrint('[FCM][refresh] refreshed token synced');
       } catch (error, stackTrace) {
-        debugPrint('[FCM] refreshed token sync failed: $error');
+        debugPrint('[FCM][refresh] refreshed token sync failed: $error');
         debugPrint('$stackTrace');
       }
     });
@@ -118,6 +167,10 @@ class FcmService {
 
   static void _listenForegroundMessages() {
     FirebaseMessaging.onMessage.listen((message) {
+      debugPrint(
+        '[FCM][message] foreground id=${message.messageId} '
+        'type=${message.data['type']} data=${message.data}',
+      );
       final notification = message.notification;
       final title =
           notification?.title ??
@@ -173,6 +226,7 @@ class FcmService {
     _notificationsUserId = userId;
 
     final supabase = Supabase.instance.client;
+    debugPrint('[FCM][in-app] subscribing user=${_idPreview(userId)}');
     _notificationsChannel = supabase
         .channel('mobile-notifications-$userId')
         .onPostgresChanges(
@@ -192,6 +246,10 @@ class FcmService {
             final data =
                 notification['data'] as Map<String, dynamic>? ?? const {};
             final type = notification['type'] as String? ?? 'info';
+            debugPrint(
+              '[FCM][in-app] notification received id=${notification['id']} '
+              'type=$type title=$title',
+            );
 
             _showInAppBanner(
               title: title,
@@ -263,12 +321,20 @@ class FcmService {
   }
 
   static void _listenNotificationTaps() {
-    FirebaseMessaging.onMessageOpenedApp.listen(_openMessageTarget);
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      debugPrint(
+        '[FCM][tap] opened id=${message.messageId} type=${message.data['type']}',
+      );
+      _openMessageTarget(message);
+    });
   }
 
   static Future<void> _handleInitialMessage() async {
     final message = await _messaging.getInitialMessage();
     if (message != null) {
+      debugPrint(
+        '[FCM][initial] opened id=${message.messageId} type=${message.data['type']}',
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openMessageTarget(message);
       });
@@ -315,5 +381,15 @@ class FcmService {
     }
 
     context.go('/notifications');
+  }
+
+  static String _tokenPreview(String token) {
+    if (token.length <= 16) return token;
+    return '${token.substring(0, 8)}...${token.substring(token.length - 6)}';
+  }
+
+  static String _idPreview(String id) {
+    if (id.length <= 12) return id;
+    return '${id.substring(0, 8)}...';
   }
 }

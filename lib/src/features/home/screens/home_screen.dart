@@ -100,7 +100,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Text('QUIZ LIVE', style: AppTextStyles.label),
                         const SizedBox(height: 10),
                         SizedBox(
-                          height: 194,
+                          height: 214,
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             clipBehavior: Clip.none,
@@ -428,6 +428,16 @@ class _LiveQuizCard extends StatelessWidget {
     final liveStartsAt = contest.liveStartsAt;
     final isEnded = contest.isLiveEnded;
     final isActiveNow = contest.isLiveActiveNow;
+    final statusColor = isEnded
+        ? AppColors.textHint
+        : isActiveNow
+        ? AppColors.accentGreen
+        : Colors.redAccent;
+    final statusText = isEnded
+        ? 'TERMINÉ'
+        : isActiveNow
+        ? 'EN DIRECT'
+        : 'BIENTÔT';
     final startsLabel = liveStartsAt == null
         ? 'Heure à confirmer'
         : '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
@@ -435,9 +445,9 @@ class _LiveQuizCard extends StatelessWidget {
 
     return InkWell(
       onTap: isEnded ? null : () => context.push('/contests/${contest.id}'),
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(24),
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -454,7 +464,7 @@ class _LiveQuizCard extends StatelessWidget {
                     AppColors.surfaceElevated,
                   ],
           ),
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(
             color: isEnded
                 ? AppColors.surfaceBorder.withValues(alpha: 0.7)
@@ -476,16 +486,15 @@ class _LiveQuizCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: isEnded
-                        ? AppColors.textHint.withValues(alpha: 0.12)
-                        : Colors.redAccent.withValues(alpha: 0.18),
+                    color: statusColor.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: isEnded
-                          ? AppColors.textHint.withValues(alpha: 0.22)
-                          : Colors.redAccent.withValues(alpha: 0.38),
+                      color: statusColor.withValues(alpha: 0.28),
                     ),
                   ),
                   child: Row(
@@ -495,27 +504,15 @@ class _LiveQuizCard extends StatelessWidget {
                         width: 7,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: isEnded
-                              ? AppColors.textHint
-                              : isActiveNow
-                              ? AppColors.accentGreen
-                              : Colors.redAccent,
+                          color: statusColor,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        isEnded
-                            ? 'TERMINÉ'
-                            : isActiveNow
-                            ? 'EN DIRECT'
-                            : 'LIVE',
+                        statusText,
                         style: AppTextStyles.label.copyWith(
-                          color: isEnded
-                              ? AppColors.textSecondary
-                              : isActiveNow
-                              ? AppColors.accentGreen
-                              : Colors.redAccent,
+                          color: statusColor,
                           fontSize: 11,
                         ),
                       ),
@@ -530,13 +527,26 @@ class _LiveQuizCard extends StatelessWidget {
                 else
                   _CategoryBadge(label: contest.type.filterLabel),
                 const Spacer(),
-                Text(
-                  startsLabel,
-                  style: AppTextStyles.h3.copyWith(
-                    color: isEnded
-                        ? AppColors.textSecondary
-                        : AppColors.primaryLight,
-                    fontSize: 15,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.background.withValues(alpha: 0.36),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.surfaceBorder.withValues(alpha: 0.8),
+                    ),
+                  ),
+                  child: Text(
+                    startsLabel,
+                    style: AppTextStyles.h3.copyWith(
+                      color: isEnded
+                          ? AppColors.textSecondary
+                          : AppColors.primaryLight,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ],
@@ -545,11 +555,11 @@ class _LiveQuizCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 54,
-                  height: 54,
+                  width: 52,
+                  height: 52,
                   decoration: BoxDecoration(
                     color: AppColors.background.withValues(alpha: 0.34),
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: isEnded
                           ? AppColors.textHint.withValues(alpha: 0.2)
@@ -564,7 +574,7 @@ class _LiveQuizCard extends StatelessWidget {
                     size: 30,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -591,32 +601,60 @@ class _LiveQuizCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (isEnded) ...[
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.history_toggle_off_rounded,
+                              color: AppColors.textHint,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                'Terminé · visible aujourd’hui',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const Spacer(),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
               decoration: BoxDecoration(
-                color: AppColors.background.withValues(alpha: 0.24),
-                borderRadius: BorderRadius.circular(16),
+                color: AppColors.background.withValues(alpha: 0.30),
+                borderRadius: BorderRadius.circular(17),
                 border: Border.all(color: AppColors.surfaceBorder),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.timer_rounded,
-                    color: AppColors.gold,
+                  Icon(
+                    isEnded
+                        ? Icons.history_toggle_off_rounded
+                        : Icons.timer_rounded,
+                    color: isEnded ? AppColors.textHint : AppColors.gold,
                     size: 17,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: isEnded
                         ? Text(
-                            'Quiz terminé · visible 24h',
+                            'Terminé · visible aujourd’hui',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: AppTextStyles.bodySmall.copyWith(
                               color: AppColors.textSecondary,
                               fontWeight: FontWeight.w800,
@@ -632,20 +670,16 @@ class _LiveQuizCard extends StatelessWidget {
                             ),
                           ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isEnded
-                        ? 'Fermé'
-                        : isRegistered
-                        ? 'Entrer'
-                        : 'S’inscrire',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: isEnded
-                          ? AppColors.textSecondary
-                          : AppColors.primaryLight,
-                      fontWeight: FontWeight.w900,
+                  if (!isEnded) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      isRegistered ? 'Entrer' : 'S’inscrire',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.primaryLight,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

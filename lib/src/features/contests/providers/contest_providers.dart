@@ -27,7 +27,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) {
   final userPlanKey = ref.watch(userProfileProvider).value?.planKey ?? 'free';
   authLogPayload('contestsStream', {
     'table': 'contests',
-    'filter': {'status': 'active', 'liveEndedWindow': '24h'},
+    'filter': {'status': 'active', 'liveEndedWindow': 'same-day'},
     'order': 'starts_at asc',
     'playerPlan': userPlanKey,
   });
@@ -154,6 +154,7 @@ final contestParticipantsCountProvider = FutureProvider.autoDispose
 class ContestDetailData {
   final Contest contest;
   final bool hasParticipated;
+  final ContestUserRanking? userRanking;
   final UserProfile userProfile;
   final int participantsCount;
   final ContestPrediction? prediction;
@@ -163,11 +164,24 @@ class ContestDetailData {
   const ContestDetailData({
     required this.contest,
     required this.hasParticipated,
+    required this.userRanking,
     required this.userProfile,
     required this.participantsCount,
     required this.prediction,
     required this.drawSettings,
     required this.hasLiveRegistration,
+  });
+}
+
+class ContestUserRanking {
+  final int rank;
+  final int score;
+  final int totalParticipants;
+
+  const ContestUserRanking({
+    required this.rank,
+    required this.score,
+    required this.totalParticipants,
   });
 }
 
@@ -364,9 +378,25 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   authLogPayload('contestParticipantsFetch', {'contestId': contestId});
   final participants = await supabase
       .from('participations')
-      .select('id')
-      .eq('contest_id', contestId);
+      .select('id, user_id, score')
+      .eq('contest_id', contestId)
+      .order('score', ascending: false);
   authLogResponse('contestParticipantsFetch', {'count': participants.length});
+
+  ContestUserRanking? userRanking;
+  if (participation != null) {
+    final userIndex = participants.indexWhere(
+      (row) => row['user_id'] == user.id,
+    );
+    if (userIndex >= 0) {
+      final score = (participants[userIndex]['score'] as num?)?.toInt() ?? 0;
+      userRanking = ContestUserRanking(
+        rank: userIndex + 1,
+        score: score,
+        totalParticipants: participants.length,
+      );
+    }
+  }
 
   ContestPrediction? prediction;
   if (contest.type == ContestType.pronostic) {
@@ -417,6 +447,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   final detail = ContestDetailData(
     contest: contest,
     hasParticipated: participation != null,
+    userRanking: userRanking,
     userProfile: profile,
     participantsCount: participants.length,
     prediction: prediction,

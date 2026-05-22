@@ -245,7 +245,11 @@ class Contest {
   bool get isLiveVisibleOnHome {
     if (!isLive) return false;
     if (!isLiveEnded) return true;
-    return endsAt.add(const Duration(hours: 24)).isAfter(DateTime.now());
+    final now = DateTime.now();
+    final referenceDate = liveStartsAt ?? endsAt;
+    return referenceDate.year == now.year &&
+        referenceDate.month == now.month &&
+        referenceDate.day == now.day;
   }
 
   String get accessLabel {

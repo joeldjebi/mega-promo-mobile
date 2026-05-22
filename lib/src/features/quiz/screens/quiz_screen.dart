@@ -60,6 +60,8 @@ class QuizScreen extends ConsumerWidget {
             : _QuizRunner(
                 contestId: contestId,
                 participationId: participationId,
+                isLive: detailData?.contest.isLive ?? false,
+                liveStartsAt: detailData?.contest.liveStartsAt,
                 questions: items,
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -143,11 +145,15 @@ class _QuizAlreadyStarted extends StatelessWidget {
 class _QuizRunner extends StatefulWidget {
   final String contestId;
   final String participationId;
+  final bool isLive;
+  final DateTime? liveStartsAt;
   final List<QuizQuestion> questions;
 
   const _QuizRunner({
     required this.contestId,
     required this.participationId,
+    required this.isLive,
+    required this.liveStartsAt,
     required this.questions,
   });
 
@@ -155,77 +161,226 @@ class _QuizRunner extends StatefulWidget {
   State<_QuizRunner> createState() => _QuizRunnerState();
 }
 
-class _QuizRunnerState extends State<_QuizRunner> {
+class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
+  static const _reviewDelay = Duration(seconds: 2);
+
   final List<QuizAnswer> _answers = [];
   Timer? _timer;
+  Timer? _autoNextTimer;
+  DateTime? _questionStartedAt;
   int _index = 0;
   int _remaining = 30;
   int? _selectedIndex;
   bool _locked = false;
+  bool _finishing = false;
 
   QuizQuestion get _question => widget.questions[_index];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startQuestion();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _autoNextTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncWithRealTime();
+    }
   }
 
   void _startQuestion() {
     _timer?.cancel();
+    _autoNextTimer?.cancel();
+    _questionStartedAt = DateTime.now();
     _selectedIndex = null;
     _locked = false;
     _remaining = _question.timeLimit <= 0 ? 30 : _question.timeLimit;
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      if (_remaining <= 1) {
-        _lockAnswer(null);
-        _nextQuestion();
-        return;
-      }
-      setState(() => _remaining--);
-    });
+    _syncWithRealTime();
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _syncWithRealTime(),
+    );
   }
 
-  void _lockAnswer(int? selectedIndex) {
+  void _syncWithRealTime() {
+    if (!mounted || _finishing) return;
+
+    if (widget.isLive && widget.liveStartsAt != null) {
+      _syncLiveQuestion();
+      return;
+    }
+
+    final startedAt = _questionStartedAt;
+    if (startedAt == null) return;
+
+    final limit = _question.timeLimit <= 0 ? 30 : _question.timeLimit;
+    final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
+    final nextRemaining = _remainingSeconds(
+      totalMs: limit * 1000,
+      elapsedMs: elapsed,
+      maxSeconds: limit,
+    );
+
+    if (nextRemaining != _remaining) {
+      setState(() => _remaining = nextRemaining);
+    }
+
+    if (!_locked && elapsed >= limit * 1000) {
+      _lockAnswer(null, autoAdvance: true);
+    }
+  }
+
+  void _syncLiveQuestion() {
+    final liveStart = widget.liveStartsAt;
+    if (liveStart == null) return;
+
+    final elapsedMs = DateTime.now().difference(liveStart).inMilliseconds;
+    if (elapsedMs < 0) {
+      setState(
+        () => _remaining = _question.timeLimit <= 0 ? 30 : _question.timeLimit,
+      );
+      return;
+    }
+
+    var consumedMs = 0;
+    for (var i = 0; i < widget.questions.length; i++) {
+      final question = widget.questions[i];
+      final limitMs = (question.timeLimit <= 0 ? 30 : question.timeLimit) * 1000;
+      final segmentMs = limitMs + _reviewDelay.inMilliseconds;
+
+      if (elapsedMs >= consumedMs + segmentMs) {
+        _addMissedAnswer(i);
+        consumedMs += segmentMs;
+        continue;
+      }
+
+      final elapsedInQuestion = elapsedMs - consumedMs;
+      final isReviewPhase = elapsedInQuestion >= limitMs;
+      final nextRemaining = _remainingSeconds(
+        totalMs: limitMs,
+        elapsedMs: elapsedInQuestion,
+        maxSeconds: question.timeLimit <= 0 ? 30 : question.timeLimit,
+      );
+
+      setState(() {
+        if (_index != i) {
+          _index = i;
+          _selectedIndex = _answerForIndex(i)?.selectedIndex;
+        }
+        _remaining = nextRemaining;
+        _locked = isReviewPhase || _answerForIndex(i) != null;
+      });
+
+      if (isReviewPhase) {
+        _addMissedAnswer(i);
+      }
+      return;
+    }
+
+    _finishQuiz();
+  }
+
+  void _lockAnswer(int? selectedIndex, {bool autoAdvance = true}) {
     if (_locked) return;
-    _timer?.cancel();
     final isCorrect = selectedIndex == _question.correctIndex;
     setState(() {
       _selectedIndex = selectedIndex;
       _locked = true;
-      _answers.add(
-        QuizAnswer(
-          questionId: _question.id,
-          selectedIndex: selectedIndex,
-          correctIndex: _question.correctIndex,
-          isCorrect: isCorrect,
-          points: isCorrect ? _question.points : 0,
-        ),
-      );
+      _answers.removeWhere((answer) => answer.questionId == _question.id);
+      _answers.add(_answerFromIndex(_index, selectedIndex, isCorrect));
     });
+    if (autoAdvance) {
+      _autoNextTimer?.cancel();
+      _autoNextTimer = Timer(_reviewDelay, _nextQuestion);
+    }
   }
 
   void _nextQuestion() {
+    if (!mounted || _finishing) return;
+    if (widget.isLive && widget.liveStartsAt != null) {
+      _syncLiveQuestion();
+      if (_locked) return;
+    }
+
     if (_index == widget.questions.length - 1) {
-      context.go(
-        '/contests/${widget.contestId}/quiz/result',
-        extra: {
-          'participationId': widget.participationId,
-          'questions': widget.questions,
-          'answers': _answers,
-        },
-      );
+      _finishQuiz();
       return;
     }
     setState(() => _index++);
     _startQuestion();
+  }
+
+  void _finishQuiz() {
+    if (_finishing) return;
+    _finishing = true;
+    _timer?.cancel();
+    _autoNextTimer?.cancel();
+    for (var i = 0; i < widget.questions.length; i++) {
+      _addMissedAnswer(i);
+    }
+    final orderedAnswers = widget.questions
+        .map((question) => _answers.firstWhere((answer) => answer.questionId == question.id))
+        .toList();
+    context.go(
+      '/contests/${widget.contestId}/quiz/result',
+      extra: {
+        'participationId': widget.participationId,
+        'questions': widget.questions,
+        'answers': orderedAnswers,
+      },
+    );
+  }
+
+  int _remainingSeconds({
+    required int totalMs,
+    required int elapsedMs,
+    required int maxSeconds,
+  }) {
+    return ((totalMs - elapsedMs) / 1000).ceil().clamp(0, maxSeconds).toInt();
+  }
+
+  QuizAnswer _answerFromIndex(int index, int? selectedIndex, bool isCorrect) {
+    final question = widget.questions[index];
+    return QuizAnswer(
+      questionId: question.id,
+      selectedIndex: selectedIndex,
+      correctIndex: question.correctIndex,
+      isCorrect: isCorrect,
+      points: isCorrect ? question.points : 0,
+    );
+  }
+
+  QuizAnswer? _answerForIndex(int index) {
+    if (index < 0 || index >= widget.questions.length) return null;
+    final questionId = widget.questions[index].id;
+    for (final answer in _answers) {
+      if (answer.questionId == questionId) return answer;
+    }
+    return null;
+  }
+
+  void _addMissedAnswer(int index) {
+    if (_answerForIndex(index) != null) return;
+    final question = widget.questions[index];
+    _answers.add(
+      QuizAnswer(
+        questionId: question.id,
+        selectedIndex: null,
+        correctIndex: question.correctIndex,
+        isCorrect: false,
+        points: 0,
+      ),
+    );
   }
 
   @override
@@ -235,6 +390,9 @@ class _QuizRunnerState extends State<_QuizRunner> {
     final questionDuration = _question.timeLimit <= 0
         ? 30
         : _question.timeLimit;
+    final actionText = _locked
+        ? (isLastQuestion ? 'Résultat dans 2 sec...' : 'Question suivante...')
+        : 'Choisis une réponse';
 
     return SafeArea(
       child: Padding(
@@ -242,50 +400,87 @@ class _QuizRunnerState extends State<_QuizRunner> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Question ${_index + 1}/${widget.questions.length}',
-                        style: AppTextStyles.label,
-                      ),
-                      const SizedBox(height: 10),
-                      LinearProgressIndicator(
-                        value: progress,
-                        minHeight: 7,
-                        backgroundColor: AppColors.surfaceElevated,
-                        color: AppColors.primary,
-                      ),
-                    ],
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.surfaceBorder),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                widget.isLive ? 'QUIZ LIVE' : 'QUIZ',
+                                style: AppTextStyles.label.copyWith(
+                                  color: AppColors.primaryLight,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${_index + 1}/${widget.questions.length}',
+                              style: AppTextStyles.label,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 8,
+                            backgroundColor: AppColors.surfaceElevated,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                SizedBox(
-                  width: 58,
-                  height: 58,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      CircularProgressIndicator(
-                        value: _remaining / questionDuration,
-                        strokeWidth: 6,
-                        backgroundColor: AppColors.surfaceElevated,
-                        color: _remaining < 10
-                            ? AppColors.accentRed
-                            : AppColors.primaryLight,
-                      ),
-                      Center(
-                        child: Text('$_remaining', style: AppTextStyles.h3),
-                      ),
-                    ],
+                  const SizedBox(width: 16),
+                  SizedBox(
+                    width: 62,
+                    height: 62,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CircularProgressIndicator(
+                          value: questionDuration == 0
+                              ? 0
+                              : _remaining / questionDuration,
+                          strokeWidth: 7,
+                          backgroundColor: AppColors.surfaceElevated,
+                          color: _remaining < 10
+                              ? AppColors.accentRed
+                              : AppColors.primaryLight,
+                        ),
+                        Center(
+                          child: Text(
+                            '$_remaining',
+                            style: AppTextStyles.h3.copyWith(fontSize: 20),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -293,12 +488,22 @@ class _QuizRunnerState extends State<_QuizRunner> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     AppCard(
-                      padding: const EdgeInsets.all(16),
-                      borderRadius: 18,
-                      child: Text(
-                        _question.questionText,
-                        textAlign: TextAlign.center,
-                        style: AppTextStyles.h2.copyWith(height: 1.35),
+                      padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+                      borderRadius: 24,
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.help_rounded,
+                            color: AppColors.primaryLight.withValues(alpha: 0.8),
+                            size: 30,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            _question.questionText,
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.h2.copyWith(height: 1.28),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -319,7 +524,7 @@ class _QuizRunnerState extends State<_QuizRunner> {
             ),
             const SizedBox(height: 10),
             AppButton(
-              text: isLastQuestion ? 'Voir le résultat' : 'Suivant',
+              text: actionText,
               onPressed: _locked ? _nextQuestion : null,
             ),
           ],

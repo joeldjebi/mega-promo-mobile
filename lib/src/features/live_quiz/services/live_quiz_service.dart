@@ -1,7 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../contests/providers/contest_providers.dart';
-import '../../home/providers/user_profile_provider.dart';
 
 class LiveQuizStartResult {
   final String participationId;
