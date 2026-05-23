@@ -9,6 +9,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/app_telemetry_service.dart';
 import '../../../services/live_quiz_notification_service.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../services/live_quiz_service.dart';
@@ -35,6 +36,13 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      AppTelemetryService.setScreen(
+        'LiveQuizWaitingScreen',
+        parameters: {'contest_id': widget.contestId},
+      ),
+    );
+    unawaited(AppTelemetryService.setContext({'contest_id': widget.contestId}));
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
     WidgetsBinding.instance.addPostFrameCallback((_) => _joinWaitingRoom());
   }
@@ -72,7 +80,9 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
 
     final remaining = startsAt.difference(DateTime.now());
     if (!mounted) return;
-    setState(() => _remaining = remaining.isNegative ? Duration.zero : remaining);
+    setState(
+      () => _remaining = remaining.isNegative ? Duration.zero : remaining,
+    );
 
     if (!_hasJoinedWaitingRoom &&
         !_isJoining &&
@@ -104,11 +114,26 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
         '/contests/${widget.contestId}/quiz',
         extra: {'participationId': result.participationId},
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'live_quiz_auto_start_failed',
+          context: {'contest_id': widget.contestId},
+        ),
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppTelemetryService.userMessageForError(
+              error,
+              fallback: 'Le démarrage automatique a échoué. Réessaie.',
+            ),
+          ),
+        ),
+      );
       setState(() {
         _isStarting = false;
         _autoStartFailed = true;
@@ -151,7 +176,8 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: IconButton(
-                      onPressed: () => context.go('/contests/${widget.contestId}'),
+                      onPressed: () =>
+                          context.go('/contests/${widget.contestId}'),
                       icon: const Icon(Icons.arrow_back_rounded),
                     ),
                   ),
@@ -231,7 +257,8 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
                         ? 'Entrée en salle...'
                         : 'Le quiz démarre automatiquement',
                     isLoading: _isStarting || _isJoining,
-                    onPressed: effectiveRemaining == Duration.zero && !_isStarting
+                    onPressed:
+                        effectiveRemaining == Duration.zero && !_isStarting
                         ? () => _startQuiz(manual: true)
                         : null,
                   ),
@@ -253,7 +280,8 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
                     const SizedBox(height: 16),
                     AppButton(
                       text: 'Retour',
-                      onPressed: () => context.go('/contests/${widget.contestId}'),
+                      onPressed: () =>
+                          context.go('/contests/${widget.contestId}'),
                     ),
                   ],
                 ),

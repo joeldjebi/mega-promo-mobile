@@ -36,7 +36,7 @@ class DeviceTelemetryService {
 
     try {
       final payload = await Future.wait([
-        _collectDeviceInfo(),
+        collectDeviceInfo(),
         _collectLocationInfo(),
       ]);
 
@@ -50,7 +50,7 @@ class DeviceTelemetryService {
     }
   }
 
-  static Future<Map<String, dynamic>> _collectDeviceInfo() async {
+  static Future<Map<String, dynamic>> collectDeviceInfo() async {
     final deviceInfo = DeviceInfoPlugin();
     final packageInfo = await PackageInfo.fromPlatform();
     final baseInfo = <String, dynamic>{

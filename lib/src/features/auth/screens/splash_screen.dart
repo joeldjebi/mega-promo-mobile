@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
 
+import '../../app_update/screens/force_update_screen.dart';
+import '../../app_update/services/app_update_service.dart';
 import '../providers/auth_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -17,13 +19,22 @@ class SplashScreen extends ConsumerStatefulWidget {
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen> {
+  AppUpdateConfig? _forceUpdateConfig;
+
   @override
   void initState() {
     super.initState();
     Timer(const Duration(milliseconds: 2500), _handleNavigation);
   }
 
-  void _handleNavigation() {
+  Future<void> _handleNavigation() async {
+    final updateStatus = await AppUpdateService.check();
+    if (!mounted) return;
+    if (updateStatus.mustUpdate && updateStatus.config != null) {
+      setState(() => _forceUpdateConfig = updateStatus.config);
+      return;
+    }
+
     final user = ref.read(authStateProvider).asData?.value;
     if (user != null) {
       if (mounted) {
@@ -38,6 +49,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final forceUpdateConfig = _forceUpdateConfig;
+    if (forceUpdateConfig != null) {
+      return ForceUpdateScreen(config: forceUpdateConfig);
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Center(

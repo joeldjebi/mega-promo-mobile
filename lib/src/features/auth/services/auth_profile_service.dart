@@ -2,19 +2,37 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../utils/auth_debug_logger.dart';
 
-Future<String> ensureUserProfileAndResolveRoute(User user, {String? phone}) async {
+Future<String> ensureUserProfileAndResolveRoute(
+  User user, {
+  String? phone,
+}) async {
   final supabase = Supabase.instance.client;
   final fallbackPhone = phone ?? user.phone;
   final now = DateTime.now().toIso8601String().split('T').first;
 
-  final profilePayload = {'id': user.id, 'select': 'username'};
+  final profilePayload = {
+    'id': user.id,
+    'select': 'username,is_active,account_status',
+  };
   authLogPayload('profileCheck', profilePayload);
   var profile = await supabase
       .from('users')
-      .select('id, username, phone')
+      .select('id, username, phone, is_active, account_status')
       .eq('id', user.id)
       .maybeSingle();
   authLogResponse('profileCheck', profile);
+
+  final accountStatus = profile?['account_status'] as String?;
+  if (profile != null &&
+      (accountStatus == 'pending_deletion' ||
+          (accountStatus == null && profile['is_active'] == false))) {
+    return '/account/reactivation';
+  }
+
+  if (profile != null && accountStatus == 'deleted') {
+    await supabase.auth.signOut();
+    throw const AuthException('account_deleted');
+  }
 
   final ensurePayload = {
     'id': user.id,
@@ -52,6 +70,8 @@ Future<String> ensureUserProfileAndResolveRoute(User user, {String? phone}) asyn
     authLogResponse('ensureUserProfilePhone', profile);
   }
 
-  final username = profile?['username'] as String?;
-  return username != null && username.trim().isNotEmpty ? '/home' : '/onboarding';
+  final username = profile['username'] as String?;
+  return username != null && username.trim().isNotEmpty
+      ? '/home'
+      : '/onboarding';
 }

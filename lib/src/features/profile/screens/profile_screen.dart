@@ -5,8 +5,10 @@ import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/app_telemetry_service.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
 import '../providers/profile_provider.dart';
@@ -54,49 +56,227 @@ class _CompactProfilePage extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxHeight < 700;
+        final horizontalPadding = 18.0;
+        final topPadding = isCompact ? 12.0 : 18.0;
+        const bottomPadding = 12.0;
 
-        return Padding(
-          padding: EdgeInsets.fromLTRB(18, isCompact ? 12 : 18, 18, 12),
-          child: Column(
-            children: [
-              _CompactProfileHeader(
-                data: data,
-                isCompact: isCompact,
-                onEdit: onEdit,
-              ),
-              SizedBox(height: isCompact ? 12 : 16),
-              _ProfileStatsStrip(data: data, isCompact: isCompact),
-              SizedBox(height: isCompact ? 10 : 14),
-              Expanded(
-                child: _ProfileActionPanel(
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            topPadding,
+            horizontalPadding,
+            bottomPadding,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight - topPadding - bottomPadding,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _CompactProfileHeader(
                   data: data,
                   isCompact: isCompact,
                   onEdit: onEdit,
                 ),
-              ),
-              SizedBox(height: isCompact ? 8 : 10),
-              SizedBox(
-                width: double.infinity,
-                height: isCompact ? 42 : 46,
-                child: TextButton.icon(
-                  onPressed: () async {
-                    await Supabase.instance.client.auth.signOut();
-                    if (context.mounted) context.go('/login');
-                  },
-                  icon: const Icon(Icons.logout_rounded, size: 18),
-                  label: const Text('Se déconnecter'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.accentRed,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+                SizedBox(height: isCompact ? 12 : 16),
+                _ProfileStatsStrip(data: data, isCompact: isCompact),
+                SizedBox(height: isCompact ? 10 : 14),
+                SizedBox(
+                  height: isCompact ? 278 : 318,
+                  child: _ProfileActionPanel(
+                    data: data,
+                    isCompact: isCompact,
+                    onEdit: onEdit,
+                  ),
+                ),
+                SizedBox(height: isCompact ? 8 : 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: isCompact ? 42 : 46,
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      await Supabase.instance.client.auth.signOut();
+                      if (context.mounted) context.go('/login');
+                    },
+                    icon: const Icon(Icons.logout_rounded, size: 18),
+                    label: const Text('Se déconnecter'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.accentRed,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+                SizedBox(height: isCompact ? 10 : 12),
+                _ProfileFooter(isCompact: isCompact),
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+class _ProfileFooter extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileFooter({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) {
+        final packageInfo = snapshot.data;
+        final version = packageInfo == null
+            ? 'Version indisponible'
+            : 'Version ${packageInfo.version} (build ${packageInfo.buildNumber})';
+
+        return Column(
+          children: [
+            Text(
+              version,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textHint,
+                fontSize: isCompact ? 10 : 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 10,
+              runSpacing: 4,
+              children: [
+                _FooterLink(
+                  label: 'Conditions Générales',
+                  onTap: () => context.push('/legal/terms'),
+                ),
+                Text(
+                  '|',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textHint.withValues(alpha: 0.62),
+                  ),
+                ),
+                _FooterLink(
+                  label: 'Politique de Confidentialité',
+                  onTap: () => context.push('/legal/privacy'),
+                ),
+              ],
+            ),
+            InkWell(
+              onTap: () => _confirmCloseAccount(context),
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Text(
+                  'Fermer mon compte MegaPromo',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textHint,
+                    fontSize: isCompact ? 11 : 13,
+                    decoration: TextDecoration.underline,
+                    decorationColor: AppColors.textHint,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _FooterLink extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _FooterLink({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+        child: Text(
+          label,
+          style: AppTextStyles.bodySmall.copyWith(
+            color: AppColors.textHint,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _confirmCloseAccount(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Fermer mon compte ?'),
+      content: const Text(
+        'Ton compte sera fermé maintenant et sa suppression définitive sera programmée dans 30 jours. Si tu reviens avant ce délai, tu pourras annuler la fermeture et récupérer ton historique.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Annuler'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          style: TextButton.styleFrom(foregroundColor: AppColors.accentRed),
+          child: const Text('Fermer mon compte'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true || !context.mounted) return;
+
+  final supabase = Supabase.instance.client;
+  final user = supabase.auth.currentUser;
+  if (user == null) return;
+
+  try {
+    final now = DateTime.now();
+    await supabase
+        .from('users')
+        .update({
+          'is_active': false,
+          'account_status': 'pending_deletion',
+          'deletion_requested_at': now.toIso8601String(),
+          'deletion_scheduled_at': now
+              .add(const Duration(days: 30))
+              .toIso8601String(),
+          'deleted_at': null,
+        })
+        .eq('id', user.id);
+    await supabase.auth.signOut();
+    if (context.mounted) context.go('/login');
+  } catch (error, stackTrace) {
+    await AppTelemetryService.recordError(
+      error,
+      stackTrace,
+      reason: 'close_account_failed',
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Impossible de fermer le compte pour le moment.'),
+      ),
     );
   }
 }
@@ -511,10 +691,7 @@ class _ProfileActionTile extends StatelessWidget {
   final _ProfileAction action;
   final bool isCompact;
 
-  const _ProfileActionTile({
-    required this.action,
-    required this.isCompact,
-  });
+  const _ProfileActionTile({required this.action, required this.isCompact});
 
   @override
   Widget build(BuildContext context) {
@@ -525,38 +702,44 @@ class _ProfileActionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         onTap: action.onTap,
         child: Padding(
-          padding: EdgeInsets.all(isCompact ? 10 : 12),
+          padding: EdgeInsets.all(isCompact ? 9 : 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: isCompact ? 30 : 34,
-                height: isCompact ? 30 : 34,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(color: AppColors.surfaceBorder),
-                ),
-                child: Icon(
-                  action.icon,
-                  color: AppColors.textSecondary,
-                  size: isCompact ? 16 : 18,
-                ),
+              Row(
+                children: [
+                  Container(
+                    width: isCompact ? 30 : 34,
+                    height: isCompact ? 30 : 34,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: AppColors.surfaceBorder),
+                    ),
+                    child: Icon(
+                      action.icon,
+                      color: AppColors.textSecondary,
+                      size: isCompact ? 16 : 18,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      action.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.h3.copyWith(
+                        color: AppColors.textPrimary,
+                        fontSize: isCompact ? 13 : 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.05,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(height: isCompact ? 7 : 9),
-              Text(
-                action.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.h3.copyWith(
-                  color: AppColors.textPrimary,
-                  fontSize: isCompact ? 13 : 14,
-                  fontWeight: FontWeight.w600,
-                  height: 1.05,
-                ),
-              ),
-              const SizedBox(height: 2),
+              SizedBox(height: isCompact ? 5 : 7),
               Text(
                 action.subtitle,
                 maxLines: 1,
@@ -602,11 +785,7 @@ class _ProfileHeader extends StatelessWidget {
                   width: 1.4,
                 ),
               ),
-              child: Icon(
-                avatar.icon,
-                color: avatar.color,
-                size: 48,
-              ),
+              child: Icon(avatar.icon, color: avatar.color, size: 48),
             ),
             Positioned(
               right: -4,
@@ -733,7 +912,9 @@ class _ProfileMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = destructive ? AppColors.accentRed : AppColors.textPrimary;
+    final foreground = destructive
+        ? AppColors.accentRed
+        : AppColors.textPrimary;
 
     return Material(
       color: Colors.transparent,
@@ -753,7 +934,9 @@ class _ProfileMenuItem extends StatelessWidget {
                 ),
                 child: Icon(
                   icon,
-                  color: destructive ? AppColors.accentRed : AppColors.textSecondary,
+                  color: destructive
+                      ? AppColors.accentRed
+                      : AppColors.textSecondary,
                   size: 22,
                 ),
               ),
@@ -1014,10 +1197,7 @@ class _ActivitySection extends StatelessWidget {
       icon: icon,
       trailing: rows.isEmpty || onViewAll == null
           ? null
-          : TextButton(
-              onPressed: onViewAll,
-              child: const Text('Voir tout'),
-            ),
+          : TextButton(onPressed: onViewAll, child: const Text('Voir tout')),
       child: rows.isEmpty
           ? _EmptyInline(icon: icon, text: empty)
           : Column(
@@ -1286,10 +1466,7 @@ void _showBadgesSheet(BuildContext context, List<Map<String, dynamic>> badges) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: _ActivityRow(
-                    row: {
-                      'prize_description': name,
-                      'status': description,
-                    },
+                    row: {'prize_description': name, 'status': description},
                     icon: Icons.military_tech_outlined,
                   ),
                 );
@@ -1413,11 +1590,17 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       widget.ref.invalidate(profileDataProvider);
 
       if (mounted) Navigator.of(context).pop();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      await AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'profile_update_failed',
+      );
       setState(() {
-        _error = error is PostgrestException
-            ? error.message
-            : 'Impossible de modifier le profil.';
+        _error = AppTelemetryService.userMessageForError(
+          error,
+          fallback: 'Impossible de modifier le profil.',
+        );
       });
     } finally {
       if (mounted) {
@@ -1450,9 +1633,13 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             const SizedBox(height: 18),
             Row(
               children: [
-                Expanded(child: Text('Modifier le profil', style: AppTextStyles.h2)),
+                Expanded(
+                  child: Text('Modifier le profil', style: AppTextStyles.h2),
+                ),
                 IconButton(
-                  onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                  onPressed: _isSaving
+                      ? null
+                      : () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded),
                 ),
               ],
@@ -1507,7 +1694,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     child: Stack(
                       children: [
                         Center(
-                          child: Icon(avatar.icon, color: avatar.color, size: 28),
+                          child: Icon(
+                            avatar.icon,
+                            color: avatar.color,
+                            size: 28,
+                          ),
                         ),
                         if (isSelected)
                           const Positioned(

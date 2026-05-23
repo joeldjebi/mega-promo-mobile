@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,10 +8,13 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../app_update/services/app_update_service.dart';
 import '../../contests/models/contest.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../../contests/widgets/contest_timer.dart';
+import '../providers/info_message_provider.dart';
 import '../providers/user_profile_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -31,6 +36,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final registeredLiveQuizIds =
         ref.watch(userRegisteredLiveQuizIdsProvider).value ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
+    final infoMessages = ref.watch(infoMessagesProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -67,21 +73,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             .toList();
                   if (filtered.isEmpty) return const _EmptyContestsState();
 
-                  final liveQuizzes = filtered
-                      .where((contest) => contest.isLiveVisibleOnHome)
-                      .toList()
-                    ..sort((a, b) {
-                      final rankCompare = _liveQuizHomeRank(
-                        a,
-                      ).compareTo(_liveQuizHomeRank(b));
-                      if (rankCompare != 0) return rankCompare;
-                      if (a.isLiveEnded && b.isLiveEnded) {
-                        return b.endsAt.compareTo(a.endsAt);
-                      }
-                      final aDate = a.liveStartsAt ?? a.startsAt ?? a.endsAt;
-                      final bDate = b.liveStartsAt ?? b.startsAt ?? b.endsAt;
-                      return aDate.compareTo(bDate);
-                    });
+                  final liveQuizzes =
+                      filtered
+                          .where((contest) => contest.isLiveVisibleOnHome)
+                          .toList()
+                        ..sort((a, b) {
+                          final rankCompare = _liveQuizHomeRank(
+                            a,
+                          ).compareTo(_liveQuizHomeRank(b));
+                          if (rankCompare != 0) return rankCompare;
+                          if (a.isLiveEnded && b.isLiveEnded) {
+                            return b.endsAt.compareTo(a.endsAt);
+                          }
+                          final aDate =
+                              a.liveStartsAt ?? a.startsAt ?? a.endsAt;
+                          final bDate =
+                              b.liveStartsAt ?? b.startsAt ?? b.endsAt;
+                          return aDate.compareTo(bDate);
+                        });
                   final boosted = shuffleContestsForSession(
                     filtered.where(
                       (contest) => contest.isBoosted && !contest.isLive,
@@ -125,6 +134,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                         const SizedBox(height: 10),
                       ],
+                      infoMessages.maybeWhen(
+                        data: (messages) => messages.isEmpty
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: _InfoMessageCarousel(messages: messages),
+                              ),
+                        orElse: () => const SizedBox.shrink(),
+                      ),
                       if (boosted.isNotEmpty) ...[
                         Text('EN VEDETTE', style: AppTextStyles.label),
                         const SizedBox(height: 10),
@@ -260,6 +278,215 @@ class _ContestFilters extends StatelessWidget {
       ),
     );
   }
+}
+
+class _InfoMessageCarousel extends ConsumerStatefulWidget {
+  final List<InfoMessage> messages;
+
+  const _InfoMessageCarousel({required this.messages});
+
+  @override
+  ConsumerState<_InfoMessageCarousel> createState() =>
+      _InfoMessageCarouselState();
+}
+
+class _InfoMessageCarouselState extends ConsumerState<_InfoMessageCarousel> {
+  final PageController _controller = PageController(viewportFraction: 0.94);
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 118,
+          child: PageView.builder(
+            controller: _controller,
+            itemCount: widget.messages.length,
+            onPageChanged: (index) => setState(() => _index = index),
+            itemBuilder: (context, index) {
+              final message = widget.messages[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: _InfoMessageCard(message: message),
+              );
+            },
+          ),
+        ),
+        if (widget.messages.length > 1) ...[
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.messages.length, (index) {
+              final active = index == _index;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: active ? 18 : 6,
+                height: 6,
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                decoration: BoxDecoration(
+                  color: active
+                      ? AppColors.primaryLight
+                      : AppColors.surfaceBorder,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _InfoMessageCard extends ConsumerWidget {
+  final InfoMessage message;
+
+  const _InfoMessageCard({required this.message});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final background = _parseColor(
+      message.backgroundColor,
+      const Color(0xFFF7C4AD),
+    );
+    final foreground = _parseColor(message.textColor, const Color(0xFF4B1609));
+
+    return Container(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: background.withValues(alpha: 0.18),
+            blurRadius: 14,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: 18,
+            bottom: 14,
+            child: Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.44),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.campaign_rounded,
+                color: foreground.withValues(alpha: 0.78),
+                size: 28,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 46, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.h2.copyWith(
+                    color: foreground,
+                    fontSize: 17,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  message.body,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.body.copyWith(
+                    color: foreground.withValues(alpha: 0.9),
+                    fontSize: 12,
+                    height: 1.2,
+                  ),
+                ),
+                const Spacer(),
+                if (message.ctaLabel.isNotEmpty)
+                  InkWell(
+                    onTap: () =>
+                        unawaited(_openInfoMessageTarget(context, message)),
+                    borderRadius: BorderRadius.circular(999),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.26),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.34),
+                        ),
+                      ),
+                      child: Text(
+                        message.ctaLabel,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: foreground,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              tooltip: 'Masquer',
+              onPressed: () => dismissInfoMessage(ref, message.id),
+              icon: Icon(Icons.close_rounded, color: foreground, size: 21),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openInfoMessageTarget(
+    BuildContext context,
+    InfoMessage message,
+  ) async {
+    final target = message.ctaUrl.trim();
+    if (target == 'app-update://store') {
+      await AppUpdateService.openCurrentPlatformStore();
+      return;
+    }
+
+    if (target.startsWith('/')) {
+      context.go(target);
+      return;
+    }
+
+    final uri = Uri.tryParse(target);
+    if (uri != null && uri.hasScheme) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+}
+
+Color _parseColor(String value, Color fallback) {
+  final normalized = value.trim().replaceFirst('#', '');
+  if (normalized.length != 6) return fallback;
+  final colorValue = int.tryParse('FF$normalized', radix: 16);
+  return colorValue == null ? fallback : Color(colorValue);
 }
 
 class _FeaturedContestCard extends StatelessWidget {
@@ -432,12 +659,12 @@ class _LiveQuizCard extends StatelessWidget {
         ? AppColors.textHint
         : isActiveNow
         ? AppColors.accentGreen
-        : Colors.redAccent;
+        : AppColors.primary;
     final statusText = isEnded
         ? 'TERMINÉ'
         : isActiveNow
         ? 'EN DIRECT'
-        : 'BIENTÔT';
+        : 'À VENIR';
     final startsLabel = liveStartsAt == null
         ? 'Heure à confirmer'
         : '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
@@ -447,172 +674,177 @@ class _LiveQuizCard extends StatelessWidget {
       onTap: isEnded ? null : () => context.push('/contests/${contest.id}'),
       borderRadius: BorderRadius.circular(24),
       child: Container(
-        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isEnded
-                ? [
-                    AppColors.surface.withValues(alpha: 0.78),
-                    AppColors.surface.withValues(alpha: 0.72),
-                    AppColors.surfaceElevated.withValues(alpha: 0.64),
-                  ]
-                : [
-                    AppColors.primary.withValues(alpha: 0.26),
-                    AppColors.surface,
-                    AppColors.surfaceElevated,
-                  ],
-          ),
+          color: isEnded ? AppColors.surface : AppColors.surfaceElevated,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: isEnded
-                ? AppColors.surfaceBorder.withValues(alpha: 0.7)
-                : AppColors.primaryLight.withValues(alpha: 0.32),
+            color: isEnded ? AppColors.textHint : statusColor,
+            width: 3,
           ),
           boxShadow: isEnded
               ? const []
               : [
                   BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.16),
-                    blurRadius: 22,
-                    offset: const Offset(0, 12),
+                    color: Colors.black.withValues(alpha: 0.07),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    blurRadius: 26,
+                    offset: const Offset(0, 14),
                   ),
                 ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: statusColor.withValues(alpha: 0.28),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+            Positioned(
+              right: 14,
+              top: 62,
+              child: Icon(
+                Icons.grid_4x4_rounded,
+                color: AppColors.primary.withValues(
+                  alpha: isEnded ? 0.04 : 0.08,
+                ),
+                size: 72,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
                       Container(
-                        width: 7,
-                        height: 7,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
-                          color: statusColor,
-                          shape: BoxShape.circle,
+                          color: statusColor.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: statusColor.withValues(alpha: 0.26),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: statusColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              statusText,
+                              style: AppTextStyles.label.copyWith(
+                                color: statusColor,
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        statusText,
-                        style: AppTextStyles.label.copyWith(
-                          color: statusColor,
-                          fontSize: 11,
+                      const SizedBox(width: 8),
+                      if (isRegistered)
+                        const _LiveRegisteredBadge()
+                      else if (hasParticipated)
+                        const _ParticipatedBadge(compact: true)
+                      else
+                        _CategoryBadge(label: contest.type.filterLabel),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.surfaceBorder),
+                        ),
+                        child: Text(
+                          startsLabel,
+                          style: AppTextStyles.h3.copyWith(
+                            color: isEnded
+                                ? AppColors.textSecondary
+                                : AppColors.primaryDark,
+                            fontSize: 13.5,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 8),
-                if (isRegistered)
-                  const _LiveRegisteredBadge()
-                else if (hasParticipated)
-                  const _ParticipatedBadge(compact: true)
-                else
-                  _CategoryBadge(label: contest.type.filterLabel),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.36),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppColors.surfaceBorder.withValues(alpha: 0.8),
-                    ),
-                  ),
-                  child: Text(
-                    startsLabel,
-                    style: AppTextStyles.h3.copyWith(
-                      color: isEnded
-                          ? AppColors.textSecondary
-                          : AppColors.primaryLight,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.34),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isEnded
-                          ? AppColors.textHint.withValues(alpha: 0.2)
-                          : AppColors.primaryLight.withValues(alpha: 0.28),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.bolt_rounded,
-                    color: isEnded
-                        ? AppColors.textHint
-                        : AppColors.primaryLight,
-                    size: 30,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 12),
+                  Row(
                     children: [
-                      Text(
-                        contest.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.h2.copyWith(
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
                           color: isEnded
-                              ? AppColors.textSecondary
-                              : AppColors.textPrimary,
-                          fontSize: 17,
-                          height: 1.15,
+                              ? AppColors.surfaceElevated.withValues(
+                                  alpha: 0.72,
+                                )
+                              : AppColors.accent,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: isEnded
+                                ? AppColors.textHint.withValues(alpha: 0.18)
+                                : AppColors.primary.withValues(alpha: 0.18),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.sports_esports_rounded,
+                          color: isEnded
+                              ? AppColors.textHint
+                              : AppColors.primaryDark,
+                          size: 27,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                      Text(
-                        '${_formatPrize(contest.prizeValue)} · ${contest.registeredCount} inscrit(s)',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySecondary.copyWith(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (isEnded) ...[
-                        const SizedBox(height: 5),
-                        Row(
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
-                              Icons.history_toggle_off_rounded,
-                              color: AppColors.textHint,
-                              size: 14,
+                            Text(
+                              contest.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.h2.copyWith(
+                                color: isEnded
+                                    ? AppColors.textSecondary
+                                    : AppColors.textPrimary,
+                                fontSize: 17,
+                                height: 1.15,
+                              ),
                             ),
-                            const SizedBox(width: 5),
-                            Expanded(
-                              child: Text(
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: _LiveQuizMetaChip(
+                                    icon: Icons.workspace_premium_rounded,
+                                    label: _formatPrize(contest.prizeValue),
+                                    muted: isEnded,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                _LiveQuizMetaChip(
+                                  icon: Icons.groups_rounded,
+                                  label: '${contest.registeredCount}',
+                                  muted: isEnded,
+                                ),
+                              ],
+                            ),
+                            if (isEnded) ...[
+                              const SizedBox(height: 5),
+                              Text(
                                 'Terminé · visible aujourd’hui',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -621,70 +853,138 @@ class _LiveQuizCard extends StatelessWidget {
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
-                      ],
+                      ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-              decoration: BoxDecoration(
-                color: AppColors.background.withValues(alpha: 0.30),
-                borderRadius: BorderRadius.circular(17),
-                border: Border.all(color: AppColors.surfaceBorder),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isEnded
-                        ? Icons.history_toggle_off_rounded
-                        : Icons.timer_rounded,
-                    color: isEnded ? AppColors.textHint : AppColors.gold,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: isEnded
-                        ? Text(
-                            'Terminé · visible aujourd’hui',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          )
-                        : liveStartsAt == null
-                        ? Text('Départ bientôt', style: AppTextStyles.bodySmall)
-                        : ContestTimer(
-                            endsAt: liveStartsAt,
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                  ),
-                  if (!isEnded) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      isRegistered ? 'Entrer' : 'S’inscrire',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.primaryLight,
-                        fontWeight: FontWeight.w900,
+                  const Spacer(),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isEnded
+                          ? AppColors.surfaceElevated.withValues(alpha: 0.70)
+                          : AppColors.accent.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(17),
+                      border: Border.all(
+                        color: isEnded
+                            ? AppColors.surfaceBorder
+                            : AppColors.primary.withValues(alpha: 0.16),
                       ),
                     ),
-                  ],
+                    child: Row(
+                      children: [
+                        Icon(
+                          isEnded
+                              ? Icons.history_toggle_off_rounded
+                              : Icons.timer_rounded,
+                          color: isEnded ? AppColors.textHint : AppColors.gold,
+                          size: 17,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: isEnded
+                              ? Text(
+                                  'Terminé · visible aujourd’hui',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                )
+                              : liveStartsAt == null
+                              ? Text(
+                                  'Départ bientôt',
+                                  style: AppTextStyles.bodySmall,
+                                )
+                              : _LiveQuizStartsCountdown(
+                                  startsAt: liveStartsAt,
+                                ),
+                        ),
+                        if (!isEnded) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceElevated,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              isRegistered ? 'Entrer' : 'Réserver',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: AppColors.primaryDark,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LiveQuizMetaChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool muted;
+
+  const _LiveQuizMetaChip({
+    required this.icon,
+    required this.label,
+    required this.muted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = muted ? AppColors.textHint : AppColors.textSecondary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: muted ? 0.58 : 0.72),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: color,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -956,6 +1256,78 @@ class _SponsoredBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LiveQuizStartsCountdown extends StatefulWidget {
+  final DateTime startsAt;
+
+  const _LiveQuizStartsCountdown({required this.startsAt});
+
+  @override
+  State<_LiveQuizStartsCountdown> createState() =>
+      _LiveQuizStartsCountdownState();
+}
+
+class _LiveQuizStartsCountdownState extends State<_LiveQuizStartsCountdown> {
+  Timer? _timer;
+  late Duration _remaining;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = _calculateRemaining();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _remaining = _calculateRemaining());
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveQuizStartsCountdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startsAt != widget.startsAt) {
+      setState(() => _remaining = _calculateRemaining());
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Duration _calculateRemaining() {
+    final remaining = widget.startsAt.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  String _formatRemaining() {
+    if (_remaining == Duration.zero) return 'Commence maintenant';
+
+    final totalHours = _remaining.inHours;
+    final minutes = _remaining.inMinutes.remainder(60);
+    final seconds = _remaining.inSeconds.remainder(60);
+
+    return 'Commence dans $totalHours:'
+        '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isUrgent =
+        _remaining > Duration.zero && _remaining < const Duration(minutes: 5);
+
+    return Text(
+      _formatRemaining(),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: AppTextStyles.bodySmall.copyWith(
+        color: isUrgent ? AppColors.accentRed : AppColors.textPrimary,
+        fontWeight: FontWeight.w900,
       ),
     );
   }

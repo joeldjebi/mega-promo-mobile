@@ -7,6 +7,8 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/app_telemetry_service.dart';
+import '../utils/app_review_auth.dart';
 import '../utils/auth_debug_logger.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -17,10 +19,14 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _phoneDigitsLength = 10;
+
   final TextEditingController _phoneController = TextEditingController();
   bool _isLoading = false;
 
-  bool get _hasPhone => _phoneController.text.trim().isNotEmpty;
+  String get _phoneDigits =>
+      _phoneController.text.replaceAll(RegExp(r'\D'), '');
+  bool get _hasValidPhone => _phoneDigits.length == _phoneDigitsLength;
 
   @override
   void initState() {
@@ -35,13 +41,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _continue() async {
-    final digits = _phoneController.text.replaceAll(RegExp(r'\D'), '');
+    final digits = _phoneDigits;
     final phone = '+225$digits';
 
-    if (digits.length < 8) {
+    if (!_hasValidPhone) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Entre un numéro valide.')));
+      ).showSnackBar(const SnackBar(content: Text('Entre les 10 chiffres.')));
       return;
     }
 
@@ -50,6 +56,21 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final payload = {'phone': phone};
       authLogPayload('signInWithOtp', payload);
+
+      if (isAppReviewPhone(phone)) {
+        authLogResponse('signInWithOtp', {
+          'success': true,
+          'mode': 'app_review_static_otp',
+        });
+        if (!mounted) return;
+        context.go(
+          Uri(
+            path: '/verify-otp',
+            queryParameters: {'phone': phone},
+          ).toString(),
+        );
+        return;
+      }
 
       await Supabase.instance.client.auth.signInWithOtp(phone: phone);
       authLogResponse('signInWithOtp', {'success': true});
@@ -65,9 +86,16 @@ class _LoginScreenState extends State<LoginScreen> {
         'code': error.code,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppTelemetryService.userMessageForError(
+              error,
+              fallback: 'Impossible d’envoyer le code. Réessaie.',
+            ),
+          ),
+        ),
+      );
     } catch (error, stackTrace) {
       authLogError('signInWithOtp', error, stackTrace);
       if (!mounted) return;
@@ -162,14 +190,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       controller: _phoneController,
                       keyboardType: TextInputType.number,
                       textInputAction: TextInputAction.done,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(_phoneDigitsLength),
+                      ],
                       style: AppTextStyles.body,
                       decoration: const InputDecoration(
                         hintText: 'Numéro de téléphone',
                         prefixIcon: Icon(Icons.phone_iphone_rounded, size: 19),
                       ),
                       onSubmitted: (_) {
-                        if (_hasPhone && !_isLoading) {
+                        if (_hasValidPhone && !_isLoading) {
                           _continue();
                         }
                       },
@@ -181,7 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
               AppButton(
                 text: 'Continuer',
                 isLoading: _isLoading,
-                onPressed: _hasPhone && !_isLoading ? _continue : null,
+                onPressed: _hasValidPhone && !_isLoading ? _continue : null,
               ),
               const Spacer(flex: 2),
               Text.rich(

@@ -15,6 +15,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../live_quiz/services/live_quiz_service.dart';
 import '../../rewards/services/badge_award_service.dart';
+import '../../../services/app_telemetry_service.dart';
 import '../../social/share_helpers.dart';
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
@@ -33,6 +34,18 @@ class ContestDetailScreen extends ConsumerStatefulWidget {
 class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
   RealtimeChannel? _refreshChannel;
   String? _currentUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      AppTelemetryService.setScreen(
+        'ContestDetailScreen',
+        parameters: {'contest_id': widget.contestId},
+      ),
+    );
+    unawaited(AppTelemetryService.setContext({'contest_id': widget.contestId}));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,14 +161,26 @@ class _ContestDetailBody extends ConsumerWidget {
     return !now.isBefore(liveStartsAt) && now.isBefore(data.contest.endsAt);
   }
 
+  bool get _isLiveRegisteredAndWaiting =>
+      data.contest.isLive &&
+      data.hasLiveRegistration &&
+      !_isWaitingRoomOpen &&
+      !_canStartLiveQuiz &&
+      !data.contest.isLiveEnded;
+
+  bool get _isActionDisabled =>
+      _planAccessDenied ||
+      _isLiveRegisteredAndWaiting ||
+      (!data.contest.isLive && _dailyLimitReached);
+
   String get _buttonText {
     if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
     if (data.contest.isLive) {
       if (data.contest.isLiveEnded) return 'Quiz Live terminé';
-      if (!data.hasLiveRegistration) return 'Je m’inscris au Quiz Live';
+      if (!data.hasLiveRegistration) return 'Réserver ma place';
       if (_isWaitingRoomOpen) return 'Entrer en salle d’attente';
       if (_canStartLiveQuiz) return 'Démarrer le Quiz Live';
-      return 'Inscrit au Quiz Live';
+      return 'Place réservée';
     }
     if (data.hasParticipated) return 'Déjà participé · Actualiser';
     if (_dailyLimitReached) {
@@ -256,7 +281,15 @@ class _ContestDetailBody extends ConsumerWidget {
             content: Text('Reviens 5 minutes avant le début du Quiz Live.'),
           ),
         );
-      } catch (error) {
+      } catch (error, stackTrace) {
+        unawaited(
+          AppTelemetryService.recordError(
+            error,
+            stackTrace,
+            reason: 'live_quiz_action_failed',
+            context: {'contest_id': data.contest.id},
+          ),
+        );
         if (!context.mounted) return;
         final message = _formatLiveQuizError(error);
         ScaffoldMessenger.of(
@@ -409,7 +442,9 @@ class _ContestDetailBody extends ConsumerWidget {
                       ],
                       if (contest.brandLogoUrl?.isNotEmpty == true) ...[
                         const Spacer(),
-                        Flexible(child: _ContestBrandLogoLine(contest: contest)),
+                        Flexible(
+                          child: _ContestBrandLogoLine(contest: contest),
+                        ),
                       ],
                     ],
                   ),
@@ -586,8 +621,7 @@ class _ContestDetailBody extends ConsumerWidget {
             top: false,
             child: AppButton(
               text: _buttonText,
-              onPressed: _planAccessDenied ||
-                      (!data.contest.isLive && _dailyLimitReached)
+              onPressed: _isActionDisabled
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
@@ -776,7 +810,8 @@ class _ContestUserRankingCard extends StatelessWidget {
                 ),
               ),
               TextButton(
-                onPressed: () => context.go('/leaderboard?contestId=$contestId'),
+                onPressed: () =>
+                    context.go('/leaderboard?contestId=$contestId'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -958,6 +993,14 @@ int _drawTickets(ContestDetailData data) {
 }
 
 String _formatLiveQuizError(Object error) {
+  final safeMessage = AppTelemetryService.userMessageForError(
+    error,
+    fallback: 'Action impossible pour le moment. Réessaie.',
+  );
+  if (safeMessage != 'Action impossible pour le moment. Réessaie.') {
+    return safeMessage;
+  }
+
   final message = '$error';
   if (message.contains('Les inscriptions sont fermees') ||
       message.contains('La porte est fermee')) {
@@ -969,7 +1012,7 @@ String _formatLiveQuizError(Object error) {
   if (message.contains('forfait')) {
     return 'Ton forfait ne permet pas de participer à ce Quiz Live.';
   }
-  return message;
+  return 'Action impossible pour le moment. Réessaie.';
 }
 
 class _PredictionParticipationSheet extends ConsumerStatefulWidget {

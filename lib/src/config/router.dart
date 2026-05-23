@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../features/auth/providers/auth_provider.dart';
 import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/onboarding_screen.dart';
 import '../features/auth/screens/splash_screen.dart';
 import '../features/auth/screens/verify_otp_screen.dart';
+import '../features/account/screens/account_reactivation_screen.dart';
 import '../features/contests/screens/contest_detail_screen.dart';
 import '../features/contests/screens/contests_screen.dart';
 import '../features/home/screens/home_screen.dart';
@@ -23,6 +25,7 @@ import '../features/quiz/screens/quiz_result_screen.dart';
 import '../features/quiz/screens/quiz_screen.dart';
 import '../features/rewards/screens/rewards_screen.dart';
 import '../features/subscriptions/screens/player_plans_screen.dart';
+import '../services/app_telemetry_service.dart';
 import '../services/fcm_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -33,20 +36,23 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/splash',
-    debugLogDiagnostics: true,
+    debugLogDiagnostics: false,
+    observers: [AppTelemetryNavigatorObserver()],
     refreshListenable: routerRefresh,
-    redirect: (context, state) {
+    redirect: (context, state) async {
       final authState = ref.read(authStateProvider);
       if (authState.isLoading && !authState.hasValue) {
         return null;
       }
 
-      final isLogged = authState.asData?.value != null;
+      final currentUser = authState.asData?.value;
+      final isLogged = currentUser != null;
       final location = state.uri.path;
       final goingToLogin = location == '/login';
       final goingToSplash = location == '/splash';
       final goingToVerifyOtp = location == '/verify-otp';
       final goingToLegal = location.startsWith('/legal/');
+      final goingToAccountReactivation = location == '/account/reactivation';
       final goingToOnboarding = location.startsWith('/onboarding');
       final goingToMainRoute =
           location == '/home' ||
@@ -58,7 +64,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           location == '/contests' ||
           location.startsWith('/contests/');
 
-      final goingToProtectedRoute = goingToMainRoute || goingToOnboarding;
+      final goingToProtectedRoute =
+          goingToMainRoute || goingToOnboarding || goingToAccountReactivation;
       final goingToAuthRoute =
           goingToLogin || goingToSplash || goingToVerifyOtp || goingToLegal;
 
@@ -66,7 +73,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/login';
       }
 
-      if (isLogged && (goingToLogin || goingToSplash)) {
+      if (isLogged) {
+        final accountRedirect = await _accountStatusRedirect(
+          userId: currentUser.id,
+          goingToAccountReactivation: goingToAccountReactivation,
+        );
+        if (accountRedirect != null) return accountRedirect;
+      }
+
+      if (isLogged && (goingToLogin || goingToSplash || goingToVerifyOtp)) {
         return '/home';
       }
 
@@ -93,6 +108,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             VerifyOtpScreen(phone: state.uri.queryParameters['phone'] ?? ''),
       ),
       GoRoute(
+        path: '/account/reactivation',
+        builder: (context, state) => const AccountReactivationScreen(),
+      ),
+      GoRoute(
         path: '/onboarding',
         builder: (context, state) => const OnboardingUsernameScreen(),
       ),
@@ -117,9 +136,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/contests/:id/live-waiting',
-        builder: (context, state) => LiveQuizWaitingScreen(
-          contestId: state.pathParameters['id'] ?? '',
-        ),
+        builder: (context, state) =>
+            LiveQuizWaitingScreen(contestId: state.pathParameters['id'] ?? ''),
       ),
       GoRoute(
         path: '/contests/:id/quiz/result',
@@ -171,6 +189,48 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+Future<String?> _accountStatusRedirect({
+  required String userId,
+  required bool goingToAccountReactivation,
+}) async {
+  try {
+    final profile = await Supabase.instance.client
+        .from('users')
+        .select('is_active, account_status')
+        .eq('id', userId)
+        .maybeSingle();
+    if (profile == null) return null;
+
+    final accountStatus = profile['account_status'] as String?;
+    final isActive = profile['is_active'] as bool? ?? true;
+    final isPendingDeletion =
+        accountStatus == 'pending_deletion' ||
+        (accountStatus == null && isActive == false);
+
+    if (isPendingDeletion) {
+      return goingToAccountReactivation ? null : '/account/reactivation';
+    }
+
+    if (goingToAccountReactivation) return '/home';
+
+    if (accountStatus == 'deleted') {
+      await Supabase.instance.client.auth.signOut();
+      return '/login';
+    }
+  } catch (error, stackTrace) {
+    debugPrint('[ROUTER][accountStatus] skipped: $error');
+    unawaited(
+      AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'account_status_redirect_failed',
+      ),
+    );
+  }
+
+  return null;
+}
 
 class GoRouterRefreshStream extends ChangeNotifier {
   late final StreamSubscription<dynamic> _subscription;

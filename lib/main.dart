@@ -6,29 +6,51 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/theme/app_theme.dart';
+import 'firebase_options.dart';
 import 'src/config/supabase_config.dart';
 import 'src/config/router.dart';
 import 'src/features/auth/providers/auth_provider.dart';
+import 'src/services/app_telemetry_service.dart';
+import 'src/services/device_session_service.dart';
 import 'src/services/device_telemetry_service.dart';
 import 'src/services/fcm_service.dart';
 import 'src/services/live_quiz_notification_service.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final firebaseReady = await _initializeFirebase();
-  await Supabase.initialize(url: kSupabaseUrl, anonKey: kSupabaseAnonKey);
-  await LiveQuizNotificationService.initialize();
-  DeviceTelemetryService.initialize();
-  if (firebaseReady) {
-    unawaited(FcmService.initialize());
-  }
+  await runZonedGuarded<Future<void>>(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      final firebaseReady = await _initializeFirebase();
+      await AppTelemetryService.initialize(firebaseReady: firebaseReady);
+      await Supabase.initialize(url: kSupabaseUrl, anonKey: kSupabaseAnonKey);
+      await LiveQuizNotificationService.initialize();
+      DeviceTelemetryService.initialize();
+      DeviceSessionService.initialize();
+      if (firebaseReady) {
+        unawaited(FcmService.initialize());
+      }
 
-  runApp(const ProviderScope(child: KonkourApp()));
+      runApp(const ProviderScope(child: KonkourApp()));
+    },
+    (error, stackTrace) {
+      unawaited(
+        AppTelemetryService.recordFatal(
+          error,
+          stackTrace,
+          reason: 'run_zoned_guarded',
+        ),
+      );
+    },
+  );
 }
 
 Future<bool> _initializeFirebase() async {
   try {
-    await Firebase.initializeApp();
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
     return true;
   } on FirebaseException catch (error) {
     debugPrint('Firebase disabled: ${error.code} ${error.message}');
@@ -47,8 +69,10 @@ class KonkourApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
 
     ref.listen(authStateProvider, (previous, next) {
+      unawaited(AppTelemetryService.setUser(next.asData?.value?.id));
       unawaited(FcmService.syncTokenForCurrentUser());
       unawaited(DeviceTelemetryService.syncForCurrentUser(force: true));
+      unawaited(DeviceSessionService.claimCurrentSession(force: true));
     });
 
     return MaterialApp.router(

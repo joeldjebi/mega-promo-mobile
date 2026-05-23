@@ -197,6 +197,7 @@
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
+				B72F0A8C2D59000100A11D5E /* Generate objective_c dSYM */,
 				5096581AB464A5663D1FBF9B /* [CP] Embed Pods Frameworks */,
 				C3872F4BDA8C9FBEAFD2991D /* [CP] Copy Pods Resources */,
 			);
@@ -361,6 +362,21 @@
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
+		};
+		B72F0A8C2D59000100A11D5E /* Generate objective_c dSYM */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Generate objective_c dSYM";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nOBJECTIVE_C_BINARY=\"${SRCROOT}/../build/native_assets/ios/objective_c.framework/objective_c\"\nOBJECTIVE_C_DSYM=\"${DWARF_DSYM_FOLDER_PATH}/objective_c.framework.dSYM\"\n\nif [ -f \"$OBJECTIVE_C_BINARY\" ]; then\n  mkdir -p \"${DWARF_DSYM_FOLDER_PATH}\"\n  rm -rf \"$OBJECTIVE_C_DSYM\"\n  xcrun dsymutil \"$OBJECTIVE_C_BINARY\" -o \"$OBJECTIVE_C_DSYM\"\n  echo \"Generated dSYM for objective_c.framework at $OBJECTIVE_C_DSYM\"\nelse\n  echo \"objective_c.framework binary not found at $OBJECTIVE_C_BINARY; skipping dSYM generation.\"\nfi\n";
 		};
 		C3872F4BDA8C9FBEAFD2991D /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -8,6 +8,7 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 
+import '../../../services/app_telemetry_service.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../models/question.dart';
 import '../providers/quiz_providers.dart';
@@ -179,6 +180,21 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      AppTelemetryService.setScreen(
+        'QuizScreen',
+        parameters: {
+          'contest_id': widget.contestId,
+          'participation_id': widget.participationId,
+        },
+      ),
+    );
+    unawaited(
+      AppTelemetryService.setContext({
+        'contest_id': widget.contestId,
+        'participation_id': widget.participationId,
+      }),
+    );
     WidgetsBinding.instance.addObserver(this);
     _startQuestion();
   }

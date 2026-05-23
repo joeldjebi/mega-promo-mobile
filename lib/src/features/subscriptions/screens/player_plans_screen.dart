@@ -7,6 +7,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../services/app_telemetry_service.dart';
 import '../providers/player_subscription_provider.dart';
 
 const _wavePaymentBaseUrl = 'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/';
@@ -366,11 +367,24 @@ Future<void> _confirmSubscription(
         ),
       ),
     );
-  } catch (error) {
+  } catch (error, stackTrace) {
+    await AppTelemetryService.recordError(
+      error,
+      stackTrace,
+      reason: 'player_subscription_failed',
+      context: {'plan_id': plan.id, 'plan_key': plan.key, 'price': plan.price},
+    );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Souscription impossible : $error')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppTelemetryService.userMessageForError(
+            error,
+            fallback: 'Souscription impossible pour le moment. Réessaie.',
+          ),
+        ),
+      ),
+    );
   }
 }
 

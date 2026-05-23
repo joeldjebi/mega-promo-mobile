@@ -9,6 +9,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../firebase_options.dart';
+import 'app_telemetry_service.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
@@ -17,7 +19,11 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await Firebase.initializeApp();
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
   } catch (_) {
     return;
   }
@@ -100,7 +106,19 @@ class FcmService {
     } catch (error, stackTrace) {
       debugPrint('[FCM][sync] token sync failed: $error');
       debugPrint('$stackTrace');
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'fcm_token_sync_failed',
+          context: {'platform': defaultTargetPlatform.name},
+        ),
+      );
     }
+  }
+
+  static Future<void> stopForCurrentUser() async {
+    await _stopInAppNotifications();
   }
 
   static Future<void> _requestPermission() async {
@@ -123,7 +141,9 @@ class FcmService {
       badge: true,
       sound: true,
     );
-    debugPrint('[FCM][foreground] presentation alert=true badge=true sound=true');
+    debugPrint(
+      '[FCM][foreground] presentation alert=true badge=true sound=true',
+    );
   }
 
   static Future<String?> _waitForApplePushToken() async {
@@ -161,6 +181,13 @@ class FcmService {
       } catch (error, stackTrace) {
         debugPrint('[FCM][refresh] refreshed token sync failed: $error');
         debugPrint('$stackTrace');
+        unawaited(
+          AppTelemetryService.recordError(
+            error,
+            stackTrace,
+            reason: 'fcm_token_refresh_sync_failed',
+          ),
+        );
       }
     });
   }
@@ -178,42 +205,7 @@ class FcmService {
           'MegaPromo';
       final body = notification?.body ?? message.data['body'] as String? ?? '';
 
-      scaffoldMessengerKey.currentState?.showMaterialBanner(
-        MaterialBanner(
-          elevation: 0,
-          backgroundColor: AppColors.surface,
-          content: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, style: AppTextStyles.h3),
-              if (body.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(body, style: AppTextStyles.bodySecondary),
-              ],
-            ],
-          ),
-          leading: const Icon(
-            Icons.notifications_active_rounded,
-            color: AppColors.primaryLight,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner();
-                _openMessageTarget(message);
-              },
-              child: const Text('Ouvrir'),
-            ),
-            TextButton(
-              onPressed: () {
-                scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner();
-              },
-              child: const Text('Fermer'),
-            ),
-          ],
-        ),
-      );
+      _showPlainNotification(title: title, body: body);
     });
   }
 
@@ -243,20 +235,13 @@ class FcmService {
             final title =
                 notification['title'] as String? ?? 'Nouveau concours';
             final body = notification['body'] as String? ?? '';
-            final data =
-                notification['data'] as Map<String, dynamic>? ?? const {};
             final type = notification['type'] as String? ?? 'info';
             debugPrint(
               '[FCM][in-app] notification received id=${notification['id']} '
               'type=$type title=$title',
             );
 
-            _showInAppBanner(
-              title: title,
-              body: body,
-              type: type,
-              data: data,
-            );
+            _showPlainNotification(title: title, body: body);
           },
         )
         .subscribe();
@@ -275,49 +260,44 @@ class FcmService {
     }
   }
 
-  static void _showInAppBanner({
+  static void _showPlainNotification({
     required String title,
     required String body,
-    required String type,
-    required Map<String, dynamic> data,
   }) {
-    scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner();
-    scaffoldMessengerKey.currentState?.showMaterialBanner(
-      MaterialBanner(
-        elevation: 0,
-        backgroundColor: AppColors.surface,
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(title, style: AppTextStyles.h3),
-            if (body.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(body, style: AppTextStyles.bodySecondary),
+    scaffoldMessengerKey.currentState
+      ?..hideCurrentMaterialBanner()
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.surface,
+          elevation: 8,
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.notifications_active_rounded,
+                color: AppColors.primaryLight,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title, style: AppTextStyles.h3),
+                    if (body.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(body, style: AppTextStyles.bodySecondary),
+                    ],
+                  ],
+                ),
+              ),
             ],
-          ],
-        ),
-        leading: const Icon(
-          Icons.notifications_active_rounded,
-          color: AppColors.primaryLight,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner();
-              _openDataTarget(type: type, data: data);
-            },
-            child: const Text('Ouvrir'),
           ),
-          TextButton(
-            onPressed: () {
-              scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner();
-            },
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
+        ),
+      );
   }
 
   static void _listenNotificationTaps() {

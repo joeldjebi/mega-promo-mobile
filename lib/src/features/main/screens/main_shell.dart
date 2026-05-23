@@ -80,6 +80,30 @@ class _MainShellState extends ConsumerState<MainShell> {
         ..invalidate(notificationsProvider);
     }
 
+    void refreshUserIfMeaningful(PostgresChangePayload payload) {
+      final oldRecord = payload.oldRecord;
+      final newRecord = payload.newRecord;
+      if (oldRecord.isNotEmpty && newRecord.isNotEmpty) {
+        const ignoredKeys = {
+          'active_device_session_id',
+          'active_device_info',
+          'active_device_seen_at',
+          'device_info',
+          'device_location',
+          'device_last_seen_at',
+          'updated_at',
+          'fcm_token',
+        };
+        final meaningfulChange = newRecord.keys.any((key) {
+          if (ignoredKeys.contains(key)) return false;
+          return oldRecord[key] != newRecord[key];
+        });
+        if (!meaningfulChange) return;
+      }
+
+      refreshAll(payload);
+    }
+
     _maintenanceChannel = supabase
         .channel('mobile-maintenance-refresh-$userId')
         .onPostgresChanges(
@@ -91,7 +115,7 @@ class _MainShellState extends ConsumerState<MainShell> {
             column: 'id',
             value: userId,
           ),
-          callback: refreshAll,
+          callback: refreshUserIfMeaningful,
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.all,

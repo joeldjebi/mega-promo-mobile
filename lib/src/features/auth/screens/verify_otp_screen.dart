@@ -8,7 +8,9 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/app_telemetry_service.dart';
 import '../services/auth_profile_service.dart';
+import '../utils/app_review_auth.dart';
 import '../utils/auth_debug_logger.dart';
 
 class VerifyOtpScreen extends StatefulWidget {
@@ -158,6 +160,11 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
       };
       authLogPayload('verifyOTP', payload);
 
+      if (isAppReviewOtp(_phone, _code)) {
+        await _submitAppReviewOtp();
+        return;
+      }
+
       final response = await Supabase.instance.client.auth.verifyOTP(
         phone: _phone,
         token: _code,
@@ -205,9 +212,15 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         'code': error.code,
       });
       if (!mounted) return;
+      final message = error.message == 'account_deleted'
+          ? 'Ce compte a été supprimé définitivement.'
+          : AppTelemetryService.userMessageForError(
+              error,
+              fallback: 'Impossible de vérifier le code. Réessaie.',
+            );
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (error, stackTrace) {
       authLogError('verifyOTP', error, stackTrace);
       if (!mounted) return;
@@ -220,6 +233,64 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
       if (mounted) {
         setState(() => _isSubmitting = false);
       }
+    }
+  }
+
+  Future<void> _submitAppReviewOtp() async {
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'app-review-login',
+        body: {'phone': _phone, 'code': _code},
+      );
+      final data = response.data;
+      if (data is! Map || data['ok'] != true) {
+        throw const AuthException('Connexion reviewer indisponible.');
+      }
+
+      final session = data['session'];
+      if (session is! Map) {
+        throw const AuthException('Session reviewer indisponible.');
+      }
+
+      final accessToken = session['access_token'] as String?;
+      final refreshToken = session['refresh_token'] as String?;
+      if (accessToken == null || refreshToken == null) {
+        throw const AuthException('Session reviewer indisponible.');
+      }
+
+      await Supabase.instance.client.auth.signOut();
+      final authResponse = await Supabase.instance.client.auth.setSession(
+        refreshToken,
+        accessToken: accessToken,
+      );
+      final user =
+          authResponse.user ?? Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        throw const AuthException('Utilisateur reviewer introuvable.');
+      }
+
+      authLogResponse('verifyOTP', {
+        'mode': 'app_review_static_otp',
+        'userId': user.id,
+        'phone': _phone,
+        'hasSession': authResponse.session != null,
+      });
+
+      final nextRoute = await ensureUserProfileAndResolveRoute(
+        user,
+        phone: _phone,
+      );
+
+      if (!mounted) return;
+      context.go(nextRoute);
+    } catch (error, stackTrace) {
+      authLogError('verifyOTPReview', error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connexion reviewer indisponible. Réessaie.'),
+        ),
+      );
     }
   }
 
@@ -250,9 +321,16 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         'code': error.code,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppTelemetryService.userMessageForError(
+              error,
+              fallback: 'Impossible de renvoyer le code. Réessaie.',
+            ),
+          ),
+        ),
+      );
     } catch (error, stackTrace) {
       authLogError('resendOtp', error, stackTrace);
       if (!mounted) return;

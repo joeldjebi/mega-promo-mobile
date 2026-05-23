@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+
+import '../../../services/app_telemetry_service.dart';
 
 void authLog(String step, Object? value) {
   debugPrint('[AUTH][$step] $value');
@@ -17,4 +21,5 @@ void authLogError(String step, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) {
     authLog('$step][stackTrace', stackTrace);
   }
+  unawaited(AppTelemetryService.recordError(error, stackTrace, reason: step));
 }
