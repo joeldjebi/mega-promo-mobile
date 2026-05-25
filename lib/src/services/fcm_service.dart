@@ -40,6 +40,8 @@ class FcmService {
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static RealtimeChannel? _notificationsChannel;
   static String? _notificationsUserId;
+  static Timer? _syncRetryTimer;
+  static int _syncRetryAttempt = 0;
 
   static Future<void> initialize() async {
     if (Firebase.apps.isEmpty) {
@@ -57,14 +59,14 @@ class FcmService {
 
     await _requestPermission();
     await _configureForegroundPresentation();
-    await syncTokenForCurrentUser();
+    await syncTokenForCurrentUser(force: true);
     _listenTokenRefresh();
     _listenForegroundMessages();
     _listenNotificationTaps();
     await _handleInitialMessage();
   }
 
-  static Future<void> syncTokenForCurrentUser() async {
+  static Future<void> syncTokenForCurrentUser({bool force = false}) async {
     if (Firebase.apps.isEmpty) {
       debugPrint('[FCM][sync] skipped: Firebase is not initialized');
       return;
@@ -73,6 +75,7 @@ class FcmService {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
       debugPrint('[FCM][sync] skipped: no authenticated user');
+      _cancelSyncRetry();
       await _stopInAppNotifications();
       return;
     }
@@ -86,6 +89,7 @@ class FcmService {
         final apnsToken = await _waitForApplePushToken();
         if (apnsToken == null) {
           debugPrint('[FCM][sync] APNs token unavailable after retries');
+          _scheduleSyncRetry(force: force);
           return;
         }
         debugPrint('[FCM][sync] APNs token ready ${_tokenPreview(apnsToken)}');
@@ -94,18 +98,28 @@ class FcmService {
       final token = await _messaging.getToken();
       if (token == null) {
         debugPrint('[FCM][sync] FCM token unavailable');
+        _scheduleSyncRetry(force: force);
         return;
       }
       debugPrint('[FCM][sync] FCM token ready ${_tokenPreview(token)}');
+      debugPrint('[FCM][sync] user=${user.id} full_fcm_token=$token');
 
       await Supabase.instance.client
           .from('users')
-          .update({'fcm_token': token})
+          .update({
+            'fcm_token': token,
+            'fcm_token_platform': _platformKey(),
+            'fcm_token_updated_at': DateTime.now().toIso8601String(),
+            'fcm_token_last_error': null,
+            'fcm_token_last_error_at': null,
+          })
           .eq('id', user.id);
+      _cancelSyncRetry();
       debugPrint('[FCM][sync] token synced for user=${_idPreview(user.id)}');
     } catch (error, stackTrace) {
       debugPrint('[FCM][sync] token sync failed: $error');
       debugPrint('$stackTrace');
+      _scheduleSyncRetry(force: force);
       unawaited(
         AppTelemetryService.recordError(
           error,
@@ -118,7 +132,30 @@ class FcmService {
   }
 
   static Future<void> stopForCurrentUser() async {
+    _cancelSyncRetry();
     await _stopInAppNotifications();
+  }
+
+  static void _scheduleSyncRetry({bool force = false}) {
+    if (_syncRetryTimer?.isActive == true) return;
+    if (!force && _syncRetryAttempt >= 12) return;
+
+    _syncRetryAttempt += 1;
+    final delay = Duration(seconds: _syncRetryAttempt <= 3 ? 2 : 10);
+    debugPrint(
+      '[FCM][sync] retry #$_syncRetryAttempt scheduled in ${delay.inSeconds}s',
+    );
+
+    _syncRetryTimer = Timer(delay, () {
+      _syncRetryTimer = null;
+      unawaited(syncTokenForCurrentUser());
+    });
+  }
+
+  static void _cancelSyncRetry() {
+    _syncRetryTimer?.cancel();
+    _syncRetryTimer = null;
+    _syncRetryAttempt = 0;
   }
 
   static Future<void> _requestPermission() async {
@@ -173,9 +210,16 @@ class FcmService {
 
       try {
         debugPrint('[FCM][refresh] token refreshed ${_tokenPreview(token)}');
+        debugPrint('[FCM][refresh] user=${user.id} full_fcm_token=$token');
         await Supabase.instance.client
             .from('users')
-            .update({'fcm_token': token})
+            .update({
+              'fcm_token': token,
+              'fcm_token_platform': _platformKey(),
+              'fcm_token_updated_at': DateTime.now().toIso8601String(),
+              'fcm_token_last_error': null,
+              'fcm_token_last_error_at': null,
+            })
             .eq('id', user.id);
         debugPrint('[FCM][refresh] refreshed token synced');
       } catch (error, stackTrace) {
@@ -366,6 +410,14 @@ class FcmService {
   static String _tokenPreview(String token) {
     if (token.length <= 16) return token;
     return '${token.substring(0, 8)}...${token.substring(token.length - 6)}';
+  }
+
+  static String _platformKey() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS => 'ios',
+      TargetPlatform.android => 'android',
+      _ => 'unknown',
+    };
   }
 
   static String _idPreview(String id) {

@@ -1,24 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
+import '../providers/player_payment_methods_provider.dart';
 import '../providers/profile_provider.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(profileDataProvider);
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  ProfileData? _lastProfileData;
+
+  @override
+  Widget build(BuildContext context) {
+    final watchedProfile = ref.watch(profileDataProvider);
+    final latestProfile = watchedProfile.asData?.value;
+    if (latestProfile != null) _lastProfileData = latestProfile;
+    final profile = _lastProfileData == null
+        ? watchedProfile
+        : AsyncData(_lastProfileData!);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F5F9),
@@ -592,10 +608,10 @@ class _ProfileActionPanel extends StatelessWidget {
         onTap: () => _showBadgesSheet(context, data.badges),
       ),
       _ProfileAction(
-        icon: Icons.settings_outlined,
-        title: 'Paramètres',
-        subtitle: 'Modifier profil',
-        onTap: onEdit,
+        icon: Icons.account_balance_wallet_rounded,
+        title: 'Paiement',
+        subtitle: 'Mobile Money',
+        onTap: () => _showPaymentMethodsSheet(context),
       ),
     ];
 
@@ -755,6 +771,969 @@ class _ProfileActionTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+void _showPaymentMethodsSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const _PaymentMethodsSheet(),
+  );
+}
+
+class _PaymentMethodsSheet extends ConsumerWidget {
+  const _PaymentMethodsSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(playerPaymentProfileProvider);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.78,
+      minChildSize: 0.52,
+      maxChildSize: 0.92,
+      builder: (context, controller) => Container(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: profile.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, stackTrace) => const Center(
+            child: Text('Impossible de charger tes moyens de paiement.'),
+          ),
+          data: (data) => ListView(
+            controller: controller,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceBorder,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Moyens de paiement',
+                style: AppTextStyles.h2.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Ces informations servent uniquement à payer tes gains. Mega Promo voit le numéro choisi pour envoyer ton Mobile Money. Tu peux ajouter un premier numéro librement. Pour modifier un numéro ou en ajouter un deuxième, une vérification d’identité est requise.',
+                style: AppTextStyles.bodySecondary,
+              ),
+              const SizedBox(height: 16),
+              _KycStatusCard(profile: data),
+              const SizedBox(height: 14),
+              if (data.methods.isEmpty)
+                const _EmptyPaymentMethodCard()
+              else
+                ...data.methods.map(
+                  (method) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _PaymentMethodCard(
+                      method: method,
+                      onTap: () {
+                        if (!data.hasApprovedKyc) {
+                          _showKycRequiredSheet(context, ref, data);
+                          return;
+                        }
+                        _showSavePaymentMethodSheet(context, method: method);
+                      },
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 6),
+              AppButton(
+                text: data.methods.isEmpty
+                    ? 'Ajouter mon numéro Mobile Money'
+                    : 'Ajouter un deuxième numéro',
+                icon: Icons.add_card_rounded,
+                onPressed: () {
+                  if (data.methods.isNotEmpty && !data.hasApprovedKyc) {
+                    _showKycRequiredSheet(context, ref, data);
+                    return;
+                  }
+                  _showSavePaymentMethodSheet(context);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _KycStatusCard extends StatelessWidget {
+  final PlayerPaymentProfile profile;
+
+  const _KycStatusCard({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final status = profile.latestKyc?.status;
+    final rejectionReason = profile.latestKyc?.rejectionReason.trim() ?? '';
+    final color = status == 'approved'
+        ? AppColors.accentGreen
+        : status == 'rejected'
+        ? AppColors.accentRed
+        : AppColors.gold;
+    final label = status == 'approved'
+        ? 'Identité vérifiée'
+        : status == 'rejected'
+        ? 'Vérification refusée'
+        : status == 'pending'
+        ? 'Vérification en cours'
+        : 'Identité non vérifiée';
+
+    final detail = status == 'rejected' && rejectionReason.isNotEmpty
+        ? rejectionReason
+        : status == 'pending'
+        ? 'Ton document est en cours de contrôle. Tu pourras ajouter ou modifier un autre numéro après validation.'
+        : null;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.verified_user_rounded, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    detail,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyPaymentMethodCard extends StatelessWidget {
+  const _EmptyPaymentMethodCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Row(
+        children: [
+          const Icon(
+            Icons.account_balance_wallet_rounded,
+            color: AppColors.gold,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Aucun numéro enregistré. Ajoute ton Mobile Money préféré pour recevoir tes gains plus vite.',
+              style: AppTextStyles.bodySecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentMethodCard extends StatelessWidget {
+  final PlayerPaymentMethod method;
+  final VoidCallback onTap;
+
+  const _PaymentMethodCard({required this.method, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: AppCard(
+        child: Row(
+          children: [
+            const Icon(Icons.phone_iphone_rounded, color: AppColors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(method.operatorName, style: AppTextStyles.h3),
+                  Text(
+                    method.isWhatsapp
+                        ? '${method.phone} · WhatsApp'
+                        : method.phone,
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                ],
+              ),
+            ),
+            if (method.isPrimary)
+              const _CompactPill(text: 'Principal', highlighted: true),
+            const SizedBox(width: 8),
+            const Icon(Icons.edit_rounded, color: AppColors.textHint, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showKycRequiredSheet(
+  BuildContext context,
+  WidgetRef ref,
+  PlayerPaymentProfile profile,
+) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _KycRequiredSheet(profile: profile),
+  );
+}
+
+class _KycRequiredSheet extends ConsumerStatefulWidget {
+  final PlayerPaymentProfile profile;
+
+  const _KycRequiredSheet({required this.profile});
+
+  @override
+  ConsumerState<_KycRequiredSheet> createState() => _KycRequiredSheetState();
+}
+
+class _KycRequiredSheetState extends ConsumerState<_KycRequiredSheet> {
+  final _imagePicker = ImagePicker();
+  String _documentType = 'national_id';
+  XFile? _frontFile;
+  XFile? _backFile;
+  bool _saving = false;
+
+  bool get _requiresBackFile => _documentType == 'national_id';
+
+  bool get _hasRequiredFiles =>
+      _frontFile != null && (!_requiresBackFile || _backFile != null);
+
+  @override
+  Widget build(BuildContext context) {
+    final latestIdentity = widget.profile.latestKyc;
+    final latestStatus = latestIdentity?.status;
+    final rejectionReason = latestIdentity?.rejectionReason.trim() ?? '';
+    final canSubmit =
+        latestStatus == null ||
+        (latestStatus == 'rejected' && rejectionReason.isNotEmpty);
+    final title = latestStatus == 'pending'
+        ? 'Vérification en cours'
+        : 'Vérification d’identité';
+    final description = latestStatus == 'pending'
+        ? 'Ton document est déjà envoyé. MegaPromo doit le valider avant que tu puisses ajouter un 2e numéro ou modifier un Mobile Money existant.'
+        : 'Pour ajouter un 2e numéro ou modifier un Mobile Money existant, MegaPromo doit confirmer que le compte t’appartient. Cela protège tes gains contre les changements frauduleux.';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: AppTextStyles.h2),
+          const SizedBox(height: 8),
+          Text(description, style: AppTextStyles.bodySecondary),
+          if (latestStatus == 'rejected' && rejectionReason.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.accentRed.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppColors.accentRed.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Text(
+                rejectionReason,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+          if (canSubmit) ...[
+            const SizedBox(height: 16),
+            _NativeSelectField(
+              label: 'Type de pièce',
+              value: _documentType,
+              options: const [
+                _NativeSelectOption(
+                  value: 'national_id',
+                  label: 'Carte Nationale d’Identité',
+                ),
+                _NativeSelectOption(value: 'passport', label: 'Passport'),
+                _NativeSelectOption(
+                  value: 'driver_license',
+                  label: 'Permis de conduire',
+                ),
+              ],
+              enabled: !_saving,
+              onChanged: (value) => setState(() {
+                _documentType = value;
+                if (!_requiresBackFile) _backFile = null;
+              }),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _documentType == 'national_id'
+                  ? 'Pièces à fournir : recto et verso de ta CNI.'
+                  : 'Pièce à fournir : photo lisible du document.',
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textHint,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _KycFilePickerTile(
+              label: _documentType == 'national_id'
+                  ? 'Charger le recto'
+                  : 'Charger le document',
+              fileName: _frontFile?.name,
+              enabled: !_saving,
+              onTap: () => _pickFile(isBack: false),
+            ),
+            if (_requiresBackFile) ...[
+              const SizedBox(height: 10),
+              _KycFilePickerTile(
+                label: 'Charger le verso',
+                fileName: _backFile?.name,
+                enabled: !_saving,
+                onTap: () => _pickFile(isBack: true),
+              ),
+            ],
+            const SizedBox(height: 18),
+            AppButton(
+              text: _saving ? 'Envoi...' : 'Envoyer ma pièce',
+              icon: Icons.verified_rounded,
+              onPressed: _saving || !_hasRequiredFiles
+                  ? null
+                  : () async {
+                      setState(() => _saving = true);
+                      try {
+                        final frontFile = _frontFile;
+                        final backFile = _backFile;
+                        if (frontFile == null) return;
+
+                        final frontUrl = await uploadPlayerKycDocument(
+                          bytes: await frontFile.readAsBytes(),
+                          fileName: frontFile.name,
+                          side: 'front',
+                        );
+                        final backUrl = _requiresBackFile && backFile != null
+                            ? await uploadPlayerKycDocument(
+                                bytes: await backFile.readAsBytes(),
+                                fileName: backFile.name,
+                                side: 'back',
+                              )
+                            : null;
+
+                        await submitPlayerKycRequest(
+                          documentType: _documentType,
+                          documentFrontUrl: frontUrl,
+                          documentBackUrl: backUrl,
+                        );
+                        ref.invalidate(playerPaymentProfileProvider);
+                        if (context.mounted) Navigator.of(context).pop();
+                      } finally {
+                        if (mounted) setState(() => _saving = false);
+                      }
+                    },
+            ),
+          ] else ...[
+            const SizedBox(height: 18),
+            AppButton(
+              text: 'Compris',
+              icon: Icons.check_rounded,
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickFile({required bool isBack}) async {
+    final file = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 86,
+      maxWidth: 2200,
+    );
+
+    if (file == null || !mounted) return;
+
+    setState(() {
+      if (isBack) {
+        _backFile = file;
+      } else {
+        _frontFile = file;
+      }
+    });
+  }
+}
+
+class _KycFilePickerTile extends StatelessWidget {
+  final String label;
+  final String? fileName;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _KycFilePickerTile({
+    required this.label,
+    required this.fileName,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.surfaceBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              fileName == null
+                  ? Icons.upload_file_rounded
+                  : Icons.check_circle_rounded,
+              color: fileName == null ? AppColors.textHint : AppColors.gold,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: AppTextStyles.body),
+                  Text(
+                    fileName ?? 'Photo lisible depuis ton téléphone',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textHint,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showSavePaymentMethodSheet(
+  BuildContext context, {
+  PlayerPaymentMethod? method,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _SavePaymentMethodSheet(method: method),
+  );
+}
+
+class _SavePaymentMethodSheet extends ConsumerStatefulWidget {
+  final PlayerPaymentMethod? method;
+
+  const _SavePaymentMethodSheet({this.method});
+
+  @override
+  ConsumerState<_SavePaymentMethodSheet> createState() =>
+      _SavePaymentMethodSheetState();
+}
+
+class _SavePaymentMethodSheetState
+    extends ConsumerState<_SavePaymentMethodSheet> {
+  final _phoneController = TextEditingController();
+  String _operatorKey = fallbackPaymentOperatorOptions.first.key;
+  String _countryId = fallbackPaymentCountry.id;
+  bool _isWhatsapp = false;
+  bool _formInitialized = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final method = widget.method;
+    if (method != null) {
+      _operatorKey = method.operatorKey;
+    }
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final countriesAsync = ref.watch(activePaymentCountriesProvider);
+    final operatorsAsync = ref.watch(activePaymentOperatorsProvider);
+
+    return operatorsAsync.when(
+      loading: () => _PaymentSheetScaffold(
+        bottomInset: MediaQuery.viewInsetsOf(context).bottom,
+        child: const SizedBox(
+          height: 220,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+      error: (error, stackTrace) => _buildWithOperators(
+        context,
+        countriesAsync,
+        fallbackPaymentOperatorOptions,
+      ),
+      data: (operators) => _buildWithOperators(
+        context,
+        countriesAsync,
+        operators.isEmpty ? fallbackPaymentOperatorOptions : operators,
+      ),
+    );
+  }
+
+  Widget _buildWithOperators(
+    BuildContext context,
+    AsyncValue<List<PaymentCountryOption>> countriesAsync,
+    List<PaymentOperatorOption> operators,
+  ) {
+    return countriesAsync.when(
+      loading: () => _PaymentSheetScaffold(
+        bottomInset: MediaQuery.viewInsetsOf(context).bottom,
+        child: const SizedBox(
+          height: 220,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+      error: (error, stackTrace) =>
+          _buildForm(context, operators, const [fallbackPaymentCountry]),
+      data: (countries) => _buildForm(context, operators, countries),
+    );
+  }
+
+  Widget _buildForm(
+    BuildContext context,
+    List<PaymentOperatorOption> operators,
+    List<PaymentCountryOption> countries,
+  ) {
+    final availableOperators = operators.isEmpty
+        ? fallbackPaymentOperatorOptions
+        : operators;
+    final availableCountries = countries.isEmpty
+        ? const [fallbackPaymentCountry]
+        : countries;
+    _initializeForm(availableCountries, availableOperators);
+
+    final selectedOperator = availableOperators.firstWhere(
+      (operator) => operator.key == _operatorKey,
+      orElse: () => availableOperators.first,
+    );
+    final selectedCountry = availableCountries.firstWhere(
+      (country) => country.id == _countryId,
+      orElse: () => availableCountries.first,
+    );
+    final phoneDigits = _phoneDigits;
+    final hasValidPhone = phoneDigits.length == selectedCountry.phoneDigits;
+
+    return _PaymentSheetScaffold(
+      bottomInset: MediaQuery.viewInsetsOf(context).bottom,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.method == null
+                ? 'Ajouter un Mobile Money'
+                : 'Modifier ce Mobile Money',
+            style: AppTextStyles.h2,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'En enregistrant ce numéro, tu autorises MegaPromo à l’utiliser pour payer tes gains. Vérifie bien le pays, l’indicatif et le numéro : une erreur peut retarder ou empêcher le paiement.',
+            style: AppTextStyles.bodySecondary,
+          ),
+          const SizedBox(height: 16),
+          _NativeSelectField(
+            label: 'Mobile Money',
+            value: _operatorKey,
+            options: availableOperators
+                .map(
+                  (operator) => _NativeSelectOption(
+                    value: operator.key,
+                    label: operator.name,
+                  ),
+                )
+                .toList(),
+            enabled: !_saving,
+            onChanged: (value) => setState(() => _operatorKey = value),
+          ),
+          const SizedBox(height: 12),
+          _NativeSelectField(
+            label: 'Pays / indicatif',
+            value: selectedCountry.id,
+            options: availableCountries
+                .map(
+                  (country) => _NativeSelectOption(
+                    value: country.id,
+                    label: country.label,
+                  ),
+                )
+                .toList(),
+            enabled: !_saving,
+            onChanged: (value) {
+              setState(() {
+                _countryId = value;
+                final nextCountry = availableCountries.firstWhere(
+                  (country) => country.id == value,
+                  orElse: () => availableCountries.first,
+                );
+                _phoneController.text = _formatPhoneDigits(
+                  _phoneDigits,
+                  nextCountry.phoneDigits,
+                );
+              });
+            },
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [
+              _GroupedPhoneInputFormatter(
+                maxDigits: selectedCountry.phoneDigits,
+              ),
+            ],
+            decoration: InputDecoration(
+              labelText: 'Numéro Mobile Money',
+              prefixText: '${selectedCountry.dialCode} ',
+              hintText: _phoneHint(selectedCountry.phoneDigits),
+              helperText:
+                  '${selectedCountry.phoneDigits} chiffres attendus pour ${selectedCountry.name}.',
+            ),
+          ),
+          const SizedBox(height: 10),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _isWhatsapp,
+            onChanged: _saving
+                ? null
+                : (value) => setState(() => _isWhatsapp = value),
+            title: Text(
+              'Ce numéro est aussi sur WhatsApp',
+              style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              'MegaPromo pourra l’utiliser pour te contacter si un paiement nécessite une vérification.',
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textHint,
+              ),
+            ),
+            activeThumbColor: AppColors.gold,
+          ),
+          const SizedBox(height: 18),
+          AppButton(
+            text: _saving ? 'Enregistrement...' : 'Enregistrer',
+            icon: Icons.save_rounded,
+            onPressed: _saving || !hasValidPhone
+                ? null
+                : () async {
+                    setState(() => _saving = true);
+                    try {
+                      await savePlayerPaymentMethod(
+                        methodId: widget.method?.id,
+                        operatorKey: selectedOperator.key,
+                        operatorName: selectedOperator.name,
+                        phone: '${selectedCountry.dialCode}$phoneDigits',
+                        isWhatsapp: _isWhatsapp,
+                      );
+                      ref.invalidate(playerPaymentProfileProvider);
+                      if (context.mounted) Navigator.of(context).pop();
+                    } finally {
+                      if (mounted) setState(() => _saving = false);
+                    }
+                  },
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _phoneDigits =>
+      _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+
+  void _initializeForm(
+    List<PaymentCountryOption> countries,
+    List<PaymentOperatorOption> operators,
+  ) {
+    if (_formInitialized) return;
+
+    if (!operators.any((operator) => operator.key == _operatorKey)) {
+      _operatorKey = operators.first.key;
+    }
+    _isWhatsapp = widget.method?.isWhatsapp ?? false;
+
+    final methodPhone = widget.method?.phone ?? '';
+    final digits = methodPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    PaymentCountryOption selected = countries.first;
+
+    for (final country in countries) {
+      final dialDigits = country.dialCode.replaceAll(RegExp(r'[^0-9]'), '');
+      if (dialDigits.isNotEmpty && digits.startsWith(dialDigits)) {
+        selected = country;
+        break;
+      }
+    }
+
+    _countryId = selected.id;
+    final dialDigits = selected.dialCode.replaceAll(RegExp(r'[^0-9]'), '');
+    final localDigits = digits.startsWith(dialDigits)
+        ? digits.substring(dialDigits.length)
+        : digits;
+    _phoneController.text = _formatPhoneDigits(
+      localDigits,
+      selected.phoneDigits,
+    );
+    _formInitialized = true;
+  }
+}
+
+class _PaymentSheetScaffold extends StatelessWidget {
+  final double bottomInset;
+  final Widget child;
+
+  const _PaymentSheetScaffold({required this.bottomInset, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
+String _formatPhoneDigits(String value, int maxDigits) {
+  final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+  final clipped = digits.length > maxDigits
+      ? digits.substring(0, maxDigits)
+      : digits;
+  final groups = <String>[];
+
+  for (var index = 0; index < clipped.length; index += 2) {
+    final end = (index + 2) > clipped.length ? clipped.length : index + 2;
+    groups.add(clipped.substring(index, end));
+  }
+
+  return groups.join(' ');
+}
+
+String _phoneHint(int phoneDigits) {
+  final sample = ''.padLeft(phoneDigits, '0');
+  return _formatPhoneDigits(sample, phoneDigits);
+}
+
+class _GroupedPhoneInputFormatter extends TextInputFormatter {
+  final int maxDigits;
+
+  const _GroupedPhoneInputFormatter({required this.maxDigits});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final formatted = _formatPhoneDigits(newValue.text, maxDigits);
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
+
+class _NativeSelectOption {
+  final String value;
+  final String label;
+
+  const _NativeSelectOption({required this.value, required this.label});
+}
+
+class _NativeSelectField extends StatelessWidget {
+  final String label;
+  final String value;
+  final List<_NativeSelectOption> options;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  const _NativeSelectField({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = options.firstWhere(
+      (option) => option.value == value,
+      orElse: () => options.first,
+    );
+
+    return InkWell(
+      onTap: enabled ? () => _showPicker(context, selected) : null,
+      borderRadius: BorderRadius.circular(14),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          enabled: enabled,
+          suffixIcon: const Icon(Icons.expand_more_rounded),
+        ),
+        child: Text(
+          selected.label,
+          style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showPicker(
+    BuildContext context,
+    _NativeSelectOption selected,
+  ) async {
+    final platform = Theme.of(context).platform;
+    if (platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) {
+      final initialIndex = options.indexWhere(
+        (option) => option.value == selected.value,
+      );
+      var pendingIndex = initialIndex < 0 ? 0 : initialIndex;
+      await showCupertinoModalPopup<void>(
+        context: context,
+        builder: (popupContext) => Container(
+          height: 290,
+          color: CupertinoColors.systemBackground.resolveFrom(popupContext),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 46,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    CupertinoButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      onPressed: () {
+                        onChanged(options[pendingIndex].value);
+                        Navigator.of(popupContext).pop();
+                      },
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: CupertinoPicker(
+                  itemExtent: 42,
+                  scrollController: FixedExtentScrollController(
+                    initialItem: pendingIndex,
+                  ),
+                  onSelectedItemChanged: (index) => pendingIndex = index,
+                  children: options
+                      .map(
+                        (option) => Center(
+                          child: Text(
+                            option.label,
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            for (final option in options)
+              ListTile(
+                title: Text(option.label),
+                trailing: option.value == value
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(sheetContext).pop(option.value),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (picked != null) onChanged(picked);
   }
 }
 

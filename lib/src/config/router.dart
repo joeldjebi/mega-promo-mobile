@@ -24,6 +24,7 @@ import '../features/quiz/models/question.dart';
 import '../features/quiz/screens/quiz_result_screen.dart';
 import '../features/quiz/screens/quiz_screen.dart';
 import '../features/rewards/screens/rewards_screen.dart';
+import '../features/rewards/screens/reward_victory_screen.dart';
 import '../features/subscriptions/screens/player_plans_screen.dart';
 import '../services/app_telemetry_service.dart';
 import '../services/fcm_service.dart';
@@ -58,10 +59,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           location == '/home' ||
           location == '/leaderboard' ||
           location == '/rewards' ||
+          location.startsWith('/rewards/') ||
           location == '/profile' ||
           location == '/subscriptions' ||
           location == '/notifications' ||
           location == '/contests' ||
+          location.startsWith('/c/') ||
           location.startsWith('/contests/');
 
       final goingToProtectedRoute =
@@ -120,6 +123,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const OnboardingAvatarScreen(),
       ),
       GoRoute(
+        path: '/c/:id',
+        redirect: (context, state) {
+          final contestId = state.pathParameters['id'] ?? '';
+          return contestId.isEmpty ? '/contests' : '/contests/$contestId';
+        },
+      ),
+      GoRoute(
         path: '/contests/:id',
         builder: (context, state) =>
             ContestDetailScreen(contestId: state.pathParameters['id'] ?? ''),
@@ -171,6 +181,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/rewards',
             builder: (context, state) => const RewardsScreen(),
+          ),
+          GoRoute(
+            path: '/rewards/:winnerId',
+            builder: (context, state) => RewardVictoryScreen(
+              winnerId: state.pathParameters['winnerId'] ?? '',
+            ),
           ),
           GoRoute(
             path: '/notifications',

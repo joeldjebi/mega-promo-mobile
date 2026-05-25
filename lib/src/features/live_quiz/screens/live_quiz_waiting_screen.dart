@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +12,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/live_quiz_notification_service.dart';
+import '../../../services/synced_clock_service.dart';
 import '../../contests/providers/contest_providers.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
+import '../../quiz/services/quiz_asset_preload_service.dart';
 import '../services/live_quiz_service.dart';
 
 class LiveQuizWaitingScreen extends ConsumerStatefulWidget {
@@ -24,18 +28,29 @@ class LiveQuizWaitingScreen extends ConsumerStatefulWidget {
       _LiveQuizWaitingScreenState();
 }
 
-class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
+class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
+    with WidgetsBindingObserver {
   Timer? _timer;
+  RealtimeChannel? _waitingRefreshChannel;
+  DateTime? _backgroundedAt;
   bool _isJoining = false;
   bool _isStarting = false;
   bool _hasJoinedWaitingRoom = false;
-  bool _notificationShown = false;
+  bool _classicWaitingNotificationShown = false;
   bool _autoStartFailed = false;
+  bool _isPreloadingAssets = false;
+  bool _hasPreloadedAssets = false;
+  bool _isArenaWindowOpen = false;
+  bool _finalClockSyncDone = false;
   Duration _remaining = Duration.zero;
+  int? _lastRenderedServerSecond;
+  String? _lastLiveActivitySignature;
+  String? _preloadedAssetsSignature;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(
       AppTelemetryService.setScreen(
         'LiveQuizWaitingScreen',
@@ -43,14 +58,119 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
       ),
     );
     unawaited(AppTelemetryService.setContext({'contest_id': widget.contestId}));
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    _subscribeWaitingUpdates();
+    unawaited(SyncedClockService.sync(force: true).whenComplete(_startTicker));
     WidgetsBinding.instance.addPostFrameCallback((_) => _joinWaitingRoom());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    final channel = _waitingRefreshChannel;
+    if (channel != null) {
+      unawaited(Supabase.instance.client.removeChannel(channel));
+    }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt = DateTime.now();
+      return;
+    }
+
+    if (state != AppLifecycleState.resumed) return;
+
+    final inactiveFor = _backgroundedAt == null
+        ? Duration.zero
+        : DateTime.now().difference(_backgroundedAt!);
+    _backgroundedAt = null;
+
+    if (inactiveFor >= const Duration(seconds: 20)) {
+      unawaited(SyncedClockService.sync(force: true));
+      clearContestDetailCache(widget.contestId);
+      ref.invalidate(contestDetailProvider(widget.contestId));
+      QuizAssetPreloadService.clearContest(widget.contestId);
+      _preloadedAssetsSignature = null;
+      _hasPreloadedAssets = false;
+      _isArenaWindowOpen = false;
+      _finalClockSyncDone = false;
+      unawaited(_joinWaitingRoom());
+      _tick();
+    }
+  }
+
+  void _startTicker() {
+    if (!mounted || _timer != null) return;
+    _tick();
+    _scheduleNextTick();
+  }
+
+  void _scheduleNextTick() {
+    _timer?.cancel();
+    if (!mounted) return;
+
+    final syncedNow = SyncedClockService.now();
+    final elapsedInCurrentSecond =
+        syncedNow.millisecondsSinceEpoch.remainder(1000);
+    final delayMs = elapsedInCurrentSecond == 0
+        ? 1000
+        : 1000 - elapsedInCurrentSecond;
+
+    _timer = Timer(Duration(milliseconds: delayMs), () {
+      _tick();
+      _scheduleNextTick();
+    });
+  }
+
+  void _subscribeWaitingUpdates() {
+    final supabase = Supabase.instance.client;
+
+    void refreshWaitingState(PostgresChangePayload payload) {
+      clearContestDetailCache(widget.contestId);
+      ref.invalidate(contestDetailProvider(widget.contestId));
+    }
+
+    _waitingRefreshChannel = supabase
+        .channel('live-quiz-waiting-${widget.contestId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'contests',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: widget.contestId,
+          ),
+          callback: refreshWaitingState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'live_quiz_registrations',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'contest_id',
+            value: widget.contestId,
+          ),
+          callback: refreshWaitingState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'live_sessions',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'contest_id',
+            value: widget.contestId,
+          ),
+          callback: refreshWaitingState,
+        )
+        .subscribe();
   }
 
   Future<void> _joinWaitingRoom() async {
@@ -78,17 +198,38 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
     final startsAt = detail?.contest.liveStartsAt;
     if (startsAt == null) return;
 
-    final remaining = startsAt.difference(DateTime.now());
+    final syncedNow = SyncedClockService.now();
+    final remaining = startsAt.difference(syncedNow);
+    final nextRemaining = remaining.isNegative
+        ? Duration.zero
+        : Duration(seconds: (remaining.inMilliseconds / 1000).ceil());
+    final nextArenaWindowOpen =
+        remaining <= const Duration(minutes: 5) && remaining > Duration.zero;
+    final serverSecond = SyncedClockService.currentServerSecond;
     if (!mounted) return;
-    setState(
-      () => _remaining = remaining.isNegative ? Duration.zero : remaining,
-    );
+    if (_remaining != nextRemaining ||
+        _isArenaWindowOpen != nextArenaWindowOpen ||
+        _lastRenderedServerSecond != serverSecond) {
+      setState(() {
+        _remaining = nextRemaining;
+        _isArenaWindowOpen = nextArenaWindowOpen;
+        _lastRenderedServerSecond = serverSecond;
+      });
+    }
 
-    if (!_hasJoinedWaitingRoom &&
-        !_isJoining &&
-        remaining <= const Duration(minutes: 5) &&
-        remaining > Duration.zero) {
+    if (!_hasJoinedWaitingRoom && !_isJoining && remaining > Duration.zero) {
       unawaited(_joinWaitingRoom());
+    }
+
+    if (!_finalClockSyncDone &&
+        remaining <= const Duration(minutes: 1) &&
+        remaining > Duration.zero) {
+      _finalClockSyncDone = true;
+      unawaited(
+        SyncedClockService.sync(force: true).whenComplete(() {
+          if (mounted) _tick();
+        }),
+      );
     }
 
     if (!remaining.isNegative && remaining > Duration.zero) return;
@@ -102,6 +243,25 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
     if (detail == null) return;
 
     if (manual) _autoStartFailed = false;
+    if (detail.contest.isLiveEnded) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce Quiz Live est terminé.')),
+      );
+      context.go('/home');
+      return;
+    }
+
+    if (!detail.contest.isLiveReady || !detail.contest.isLiveActiveNow) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('L’arène du Quiz Live se prépare. Reviens vite.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isStarting = true);
     try {
       final result = await startLiveQuizParticipation(data: detail);
@@ -150,23 +310,37 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
       body: SafeArea(
         child: detail.when(
           data: (data) {
+            if (data.contest.isLiveEnded) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!context.mounted) return;
+                clearContestDetailCache(widget.contestId);
+                clearHomeBootstrapCache(
+                  userId: Supabase.instance.client.auth.currentUser?.id,
+                  clearStored: true,
+                );
+                ref.invalidate(contestDetailProvider(widget.contestId));
+                ref.invalidate(contestsProvider);
+                ref.invalidate(homeBootstrapProvider);
+                context.go('/home');
+              });
+              return const Center(child: CircularProgressIndicator());
+            }
+
             final startsAt = data.contest.liveStartsAt;
             final rawRemaining = startsAt == null
                 ? _remaining
-                : startsAt.difference(DateTime.now());
+                : startsAt.difference(SyncedClockService.now());
             final effectiveRemaining = rawRemaining.isNegative
                 ? Duration.zero
-                : rawRemaining;
-            if (startsAt != null && !_notificationShown) {
-              _notificationShown = true;
-              unawaited(
-                LiveQuizNotificationService.showWaitingNotification(
-                  contestId: data.contest.id,
-                  title: data.contest.title,
-                  startsAt: startsAt,
-                ),
-              );
-            }
+                : Duration(
+                    seconds: (rawRemaining.inMilliseconds / 1000).ceil(),
+                  );
+            final arenaWindowOpen =
+                startsAt != null &&
+                rawRemaining <= const Duration(minutes: 5) &&
+                rawRemaining > Duration.zero;
+            _syncWaitingNotification(data, startsAt);
+            _maybePreloadQuizAssets(data, startsAt, effectiveRemaining);
 
             return Padding(
               padding: const EdgeInsets.fromLTRB(22, 18, 22, 24),
@@ -235,6 +409,26 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
                           '${data.contest.registeredCount} inscrit(s) · ${data.contest.connectedCount} prêt(s)',
                           style: AppTextStyles.bodySecondary,
                         ),
+                        if (arenaWindowOpen &&
+                            (_isPreloadingAssets || !_hasPreloadedAssets)) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Chargement de l’arène...',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.primaryLight,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ] else if (arenaWindowOpen || _hasPreloadedAssets) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Arène prête',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.accentGreen,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -242,7 +436,7 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
                   AppCard(
                     padding: const EdgeInsets.all(16),
                     child: Text(
-                      'Reste sur cette page. À l’heure exacte, le quiz démarre automatiquement. Si ton téléphone est verrouillé, la notification Quiz Live reste visible sur Android.',
+                      'Reste sur cette page. À l’heure exacte, le quiz démarre automatiquement. Si ton téléphone est verrouillé, le suivi Quiz Live reste visible sur iPhone compatible et en notification persistante sur Android.',
                       textAlign: TextAlign.center,
                       style: AppTextStyles.bodySecondary,
                     ),
@@ -292,10 +486,88 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen> {
       ),
     );
   }
+
+  void _syncWaitingNotification(ContestDetailData data, DateTime? startsAt) {
+    if (startsAt == null) return;
+
+    final signature = [
+      data.contest.id,
+      startsAt.millisecondsSinceEpoch,
+      data.contest.registeredCount,
+      data.contest.connectedCount,
+    ].join('|');
+    if (_lastLiveActivitySignature == signature) return;
+    _lastLiveActivitySignature = signature;
+
+    final showClassicNotification =
+        !_classicWaitingNotificationShown &&
+        defaultTargetPlatform != TargetPlatform.iOS;
+    _classicWaitingNotificationShown = true;
+
+    unawaited(
+      LiveQuizNotificationService.showWaitingNotification(
+        contestId: data.contest.id,
+        title: data.contest.title,
+        startsAt: startsAt,
+        prizeLabel: _formatPrize(data.contest.prizeValue),
+        registeredCount: data.contest.registeredCount,
+        connectedCount: data.contest.connectedCount,
+        showClassicNotification: showClassicNotification,
+      ),
+    );
+  }
+
+  void _maybePreloadQuizAssets(
+    ContestDetailData data,
+    DateTime? startsAt,
+    Duration remaining,
+  ) {
+    if (startsAt == null || !data.contest.isLiveReady) return;
+    if (remaining > const Duration(minutes: 5)) return;
+    final signature = [
+      data.contest.id,
+      startsAt.millisecondsSinceEpoch,
+      data.contest.liveDurationSeconds,
+      data.contest.liveQuestionsCount,
+    ].join('|');
+    if (_preloadedAssetsSignature == signature) return;
+    _preloadedAssetsSignature = signature;
+    _hasPreloadedAssets = false;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final startedAt = DateTime.now();
+      setState(() => _isPreloadingAssets = true);
+      unawaited(
+        QuizAssetPreloadService.preloadForContest(
+          context,
+          contestId: data.contest.id,
+        ).whenComplete(() async {
+          final elapsed = DateTime.now().difference(startedAt);
+          const minimumVisibleDuration = Duration(seconds: 3);
+          if (elapsed < minimumVisibleDuration) {
+            await Future<void>.delayed(minimumVisibleDuration - elapsed);
+          }
+          if (mounted) {
+            setState(() {
+              _isPreloadingAssets = false;
+              _hasPreloadedAssets = true;
+            });
+          }
+        }),
+      );
+    });
+  }
 }
 
 String _formatDuration(Duration duration) {
   final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
+}
+
+String _formatPrize(num value) {
+  final rounded = value.round();
+  if (rounded <= 0) return 'Gain surprise';
+  return '$rounded FCFA';
 }

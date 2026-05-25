@@ -21,8 +21,8 @@ class ProfileData {
 
 final profileDataProvider = FutureProvider<ProfileData>((ref) async {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) throw StateError('Utilisateur non connecté.');
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) throw StateError('Utilisateur non connecté.');
 
   final profile = await ref.watch(userProfileProvider.future);
   final badges = await _safeFetchList(
@@ -30,14 +30,14 @@ final profileDataProvider = FutureProvider<ProfileData>((ref) async {
     () => supabase
         .from('user_badges')
         .select('badges(name, description, icon_url)')
-        .eq('user_id', user.id),
+        .eq('user_id', userId),
   );
   final participations = await _safeFetchList(
     'profileParticipations',
     () => supabase
         .from('participations')
         .select('id, score, participated_at, contests(title)')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('participated_at', ascending: false)
         .limit(5),
   );
@@ -46,7 +46,7 @@ final profileDataProvider = FutureProvider<ProfileData>((ref) async {
     () => supabase
         .from('winners')
         .select('id, prize_description, status, created_at, contests(title)')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', ascending: false)
         .limit(5),
   );

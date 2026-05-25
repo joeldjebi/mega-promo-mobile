@@ -39,13 +39,13 @@ class AppNotification {
 
 final notificationsProvider = StreamProvider<List<AppNotification>>((ref) {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) return Stream.value(const []);
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return Stream.value(const []);
 
   return supabase
       .from('notifications')
       .stream(primaryKey: ['id'])
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('created_at', ascending: false)
       .map((rows) => rows.map(AppNotification.fromJson).toList());
 });

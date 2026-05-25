@@ -191,8 +191,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       keyboardType: TextInputType.number,
                       textInputAction: TextInputAction.done,
                       inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(_phoneDigitsLength),
+                        _PhoneNumberInputFormatter(
+                          maxDigits: _phoneDigitsLength,
+                        ),
                       ],
                       style: AppTextStyles.body,
                       decoration: const InputDecoration(
@@ -253,6 +254,62 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+}
+
+class _PhoneNumberInputFormatter extends TextInputFormatter {
+  final int maxDigits;
+
+  const _PhoneNumberInputFormatter({required this.maxDigits});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = newValue.text
+        .replaceAll(RegExp(r'\D'), '')
+        .characters
+        .take(maxDigits)
+        .join();
+    final formatted = _formatDigits(digits);
+    final digitsBeforeCursor = newValue.text
+        .substring(0, newValue.selection.end.clamp(0, newValue.text.length))
+        .replaceAll(RegExp(r'\D'), '')
+        .length
+        .clamp(0, digits.length);
+    final cursorOffset = _offsetForDigitIndex(formatted, digitsBeforeCursor);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: cursorOffset),
+      composing: TextRange.empty,
+    );
+  }
+
+  String _formatDigits(String digits) {
+    final buffer = StringBuffer();
+    for (var index = 0; index < digits.length; index += 1) {
+      if (index > 0 && index.isEven) buffer.write(' ');
+      buffer.write(digits[index]);
+    }
+    return buffer.toString();
+  }
+
+  int _offsetForDigitIndex(String formatted, int digitIndex) {
+    if (digitIndex <= 0) return 0;
+    var seenDigits = 0;
+    for (var index = 0; index < formatted.length; index += 1) {
+      if (_isDigit(formatted.codeUnitAt(index))) {
+        seenDigits += 1;
+        if (seenDigits == digitIndex) return index + 1;
+      }
+    }
+    return formatted.length;
+  }
+
+  bool _isDigit(int codeUnit) {
+    return codeUnit >= 48 && codeUnit <= 57;
   }
 }
 

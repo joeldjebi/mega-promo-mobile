@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../../services/synced_clock_service.dart';
 import '../models/contest.dart';
 
 final categoriesProvider = FutureProvider<List<Category>>((ref) async {
@@ -22,55 +26,94 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
   return rows.map(Category.fromJson).toList();
 });
 
-final contestsProvider = StreamProvider<List<Contest>>((ref) {
+final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   final supabase = ref.watch(supabaseProvider);
-  final userPlanKey = ref.watch(userProfileProvider).value?.planKey ?? 'free';
+  final bootstrap = ref.watch(homeBootstrapProvider).value;
+  final userPlanKey =
+      bootstrap?.profile.planKey ??
+      ref.watch(userProfileProvider).value?.planKey ??
+      'free';
   authLogPayload('contestsStream', {
     'table': 'contests',
     'filter': {'status': 'active', 'liveEndedWindow': 'same-day'},
     'order': 'starts_at asc',
     'playerPlan': userPlanKey,
   });
+  await _processLiveQuizEvents(supabase);
+
+  final bootstrapContests = bootstrap?.contests;
+  if (bootstrapContests != null) {
+    yield _sortContests(
+      bootstrapContests
+          .where((contest) => contest.isAccessibleForPlan(userPlanKey))
+          .where((contest) => !contest.isLive || contest.isLiveReady)
+          .toList(),
+    );
+  }
+
+  yield await _loadContestsSnapshot(supabase, userPlanKey);
 
   final stream = supabase
       .from('contests')
       .stream(primaryKey: ['id'])
       .order('starts_at', ascending: true)
-      .map((rows) {
+      .asyncMap((rows) async {
         authLogResponse('contestsStream', {'count': rows.length});
-        final now = DateTime.now();
-        final contests = rows
-            .map(Contest.fromJson)
-            .where((contest) {
-              if (contest.isLive) return contest.isLiveVisibleOnHome;
-              return contest.status == 'active' && contest.endsAt.isAfter(now);
-            })
-            .where((contest) => contest.isAccessibleForPlan(userPlanKey))
-            .toList();
-        contests.sort((a, b) {
-          final boostCompare = b.isBoosted.toString().compareTo(
-            a.isBoosted.toString(),
-          );
-          if (boostCompare != 0) return boostCompare;
-          return (a.startsAt ?? a.endsAt).compareTo(b.startsAt ?? b.endsAt);
-        });
-        return contests;
+        await _processLiveQuizEvents(supabase);
+        return _loadContestsSnapshot(supabase, userPlanKey);
       });
 
-  return stream.handleError((Object error, StackTrace stackTrace) {
+  yield* stream.handleError((Object error, StackTrace stackTrace) {
     authLogError('contestsStream', error, stackTrace);
   });
 });
 
+Future<List<Contest>> _loadContestsSnapshot(
+  dynamic supabase,
+  String userPlanKey,
+) async {
+  final rows = await _fetchContestsWithLiveDuration(supabase);
+  final now = SyncedClockService.now();
+  final contests = rows
+      .map(Contest.fromJson)
+      .where((contest) {
+        if (contest.isLive) return contest.isLiveVisibleOnHome;
+        return contest.status == 'active' && contest.endsAt.isAfter(now);
+      })
+      .where((contest) => contest.isAccessibleForPlan(userPlanKey))
+      .toList();
+  return _sortContests(contests);
+}
+
+List<Contest> _sortContests(List<Contest> contests) {
+  contests.sort((a, b) {
+    final boostCompare = b.isBoosted.toString().compareTo(
+      a.isBoosted.toString(),
+    );
+    if (boostCompare != 0) return boostCompare;
+    return (a.startsAt ?? a.endsAt).compareTo(b.startsAt ?? b.endsAt);
+  });
+  return contests;
+}
+
+Future<void> _processLiveQuizEvents(dynamic supabase) async {
+  try {
+    await supabase.rpc('process_live_quiz_events');
+  } catch (_) {
+    // The stream can still render with the current rows if the maintenance RPC
+    // has not been deployed yet.
+  }
+}
+
 final userParticipatedContestIdsProvider = StreamProvider<Set<String>>((ref) {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) return Stream.value(const <String>{});
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return Stream.value(const <String>{});
 
   return supabase
       .from('participations')
       .stream(primaryKey: ['id'])
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .map((rows) {
         return rows
             .map((row) => row['contest_id'] as String?)
@@ -81,13 +124,13 @@ final userParticipatedContestIdsProvider = StreamProvider<Set<String>>((ref) {
 
 final userRegisteredLiveQuizIdsProvider = StreamProvider<Set<String>>((ref) {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) return Stream.value(const <String>{});
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return Stream.value(const <String>{});
 
   return supabase
       .from('live_quiz_registrations')
       .stream(primaryKey: ['id'])
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .map((rows) {
         return rows
             .where((row) => (row['status'] as String? ?? '') == 'registered')
@@ -105,13 +148,12 @@ final contestsShuffleSeedProvider =
 class ContestsShuffleSeedNotifier extends Notifier<int> {
   @override
   int build() {
-    final supabase = ref.watch(supabaseProvider);
-    return nextContestShuffleSeed(supabase.auth.currentUser?.id);
+    final userId = ref.watch(currentUserIdProvider);
+    return nextContestShuffleSeed(userId);
   }
 
   void refresh() {
-    final supabase = ref.read(supabaseProvider);
-    state = nextContestShuffleSeed(supabase.auth.currentUser?.id);
+    state = nextContestShuffleSeed(ref.read(currentUserIdProvider));
   }
 }
 
@@ -270,50 +312,144 @@ void clearAllContestDetailCache() {
   _contestDetailCache.clear();
 }
 
+Contest? _findContest(List<Contest>? contests, String contestId) {
+  if (contests == null) return null;
+  for (final contest in contests) {
+    if (contest.id == contestId) return contest;
+  }
+  return null;
+}
+
+Future<Contest> _fetchContestDetailContest(
+  dynamic supabase,
+  String contestId,
+) async {
+  final contestRows = await _fetchContestsWithLiveDuration(
+    supabase,
+    contestId: contestId,
+  );
+  if (contestRows.isEmpty) {
+    throw StateError('Concours introuvable.');
+  }
+  final contestRow = contestRows.first;
+  authLogResponse('contestDetailFetch', contestRow);
+  return Contest.fromJson(contestRow);
+}
+
+Future<Map<String, dynamic>?> _fetchContestParticipation(
+  dynamic supabase,
+  String userId,
+  String contestId,
+) async {
+  authLogPayload('contestParticipationCheck', {
+    'userId': userId,
+    'contestId': contestId,
+  });
+  final participation = await supabase
+      .from('participations')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('contest_id', contestId)
+      .maybeSingle();
+  authLogResponse('contestParticipationCheck', participation);
+  if (participation == null) return null;
+  return Map<String, dynamic>.from(participation as Map);
+}
+
+Future<bool> _fetchLiveRegistration(
+  dynamic supabase,
+  String userId,
+  String contestId,
+) async {
+  try {
+    authLogPayload('liveRegistrationCheck', {
+      'userId': userId,
+      'contestId': contestId,
+    });
+    final registration = await supabase
+        .from('live_quiz_registrations')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('contest_id', contestId)
+        .maybeSingle();
+    authLogResponse('liveRegistrationCheck', registration);
+    return registration != null;
+  } catch (error, stackTrace) {
+    authLogError('liveRegistrationCheck', error, stackTrace);
+    return false;
+  }
+}
+
 final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   ref,
   contestId,
 ) async {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
+  final bootstrap = ref.read(homeBootstrapProvider).value;
+  final userId = ref.watch(currentUserIdProvider);
 
-  if (user == null) {
+  if (userId == null) {
     throw StateError('Utilisateur non connecté.');
   }
 
-  final cacheKey = _contestDetailCacheKey(user.id, contestId);
+  final cacheKey = _contestDetailCacheKey(userId, contestId);
   final cachedDetail = _contestDetailCache[cacheKey];
-  if (cachedDetail != null) {
+  if (cachedDetail != null && !cachedDetail.contest.isLive) {
     authLogResponse('contestDetailCache', {
       'contestId': contestId,
       'hit': true,
     });
     return cachedDetail;
+  } else if (cachedDetail != null) {
+    authLogResponse('contestDetailCache', {
+      'contestId': contestId,
+      'hit': false,
+      'reason': 'live_contest_requires_fresh_state',
+    });
   }
 
+  final bootstrapContest = _findContest(bootstrap?.contests, contestId);
   authLogPayload('contestDetailFetch', {'contestId': contestId});
-  final contestRow = await supabase
-      .from('contests')
-      .select()
-      .eq('id', contestId)
-      .single();
-  authLogResponse('contestDetailFetch', contestRow);
-  var contest = Contest.fromJson(contestRow);
+  await _processLiveQuizEvents(supabase);
+  final contestFuture = bootstrapContest != null && !bootstrapContest.isLive
+      ? Future<Contest>.value(bootstrapContest)
+      : _fetchContestDetailContest(supabase, contestId);
+  final profileFuture = bootstrap?.profile == null
+      ? fetchCurrentUserProfile(ref, userId: userId)
+      : Future<UserProfile>.value(bootstrap!.profile);
+  final participationFuture =
+      bootstrap?.participatedContestIds.contains(contestId) == true
+      ? Future<Map<String, dynamic>?>.value(<String, dynamic>{'id': 'cached'})
+      : _fetchContestParticipation(supabase, userId, contestId);
+
+  final liveRegistrationFuture =
+      bootstrap?.registeredLiveQuizIds.contains(contestId) == true
+      ? Future<bool>.value(true)
+      : _fetchLiveRegistration(supabase, userId, contestId);
+
+  var contest = await contestFuture;
+  final profile = await profileFuture;
+  final participation = await participationFuture;
+  var hasLiveRegistration = contest.isLive
+      ? await liveRegistrationFuture
+      : false;
 
   if (contest.categoryId != null) {
     try {
-      authLogPayload('contestCategoryFetch', {
-        'categoryId': contest.categoryId,
-      });
-      final categoryRow = await supabase
-          .from('categories')
-          .select('id, name, description, icon, color, is_active')
-          .eq('id', contest.categoryId!)
-          .maybeSingle();
-      authLogResponse('contestCategoryFetch', categoryRow);
-      contest = contest.copyWithCategory(
-        categoryRow == null ? null : Category.fromJson(categoryRow),
-      );
+      if (contest.categoryData == null) {
+        authLogPayload('contestCategoryFetch', {
+          'categoryId': contest.categoryId,
+        });
+        final categoryRow = await supabase
+            .from('categories')
+            .select('id, name, description, icon, color, is_active')
+            .eq('id', contest.categoryId!)
+            .maybeSingle();
+        authLogResponse('contestCategoryFetch', categoryRow);
+        contest = contest.copyWithCategory(
+          categoryRow == null ? null : Category.fromJson(categoryRow),
+        );
+      }
     } catch (error, stackTrace) {
       authLogError('contestCategoryFetch', error, stackTrace);
     }
@@ -331,62 +467,30 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     authLogResponse('contestIncrementView', viewResponse);
     if (viewResponse is Map<String, dynamic>) {
       final nextViewsCount = (viewResponse['views_count'] as num?)?.toInt();
-      final counted = viewResponse['counted'] == true;
       if (nextViewsCount != null) {
         contest = contest.copyWithViewsCount(nextViewsCount);
-      }
-      if (counted) {
-        ref.invalidate(contestsProvider);
       }
     }
   } catch (error, stackTrace) {
     authLogError('contestIncrementView', error, stackTrace);
   }
 
-  authLogPayload('contestParticipationCheck', {
-    'userId': user.id,
-    'contestId': contestId,
-  });
-  final participation = await supabase
-      .from('participations')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('contest_id', contestId)
-      .maybeSingle();
-  authLogResponse('contestParticipationCheck', participation);
-
-  var hasLiveRegistration = false;
-  if (contest.isLive) {
-    try {
-      authLogPayload('liveRegistrationCheck', {
-        'userId': user.id,
-        'contestId': contestId,
-      });
-      final registration = await supabase
-          .from('live_quiz_registrations')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('contest_id', contestId)
-          .maybeSingle();
-      authLogResponse('liveRegistrationCheck', registration);
-      hasLiveRegistration = registration != null;
-    } catch (error, stackTrace) {
-      authLogError('liveRegistrationCheck', error, stackTrace);
-    }
-  }
-
-  authLogPayload('contestParticipantsFetch', {'contestId': contestId});
-  final participants = await supabase
-      .from('participations')
-      .select('id, user_id, score')
-      .eq('contest_id', contestId)
-      .order('score', ascending: false);
-  authLogResponse('contestParticipantsFetch', {'count': participants.length});
-
   ContestUserRanking? userRanking;
+  var participantsCount = contest.participantsCount;
   if (participation != null) {
+    authLogPayload('contestParticipantsFetch', {
+      'contestId': contestId,
+      'reason': 'ranking',
+    });
+    final participants = await supabase
+        .from('participations')
+        .select('id, user_id, score')
+        .eq('contest_id', contestId)
+        .order('score', ascending: false);
+    participantsCount = participants.length;
+    authLogResponse('contestParticipantsFetch', {'count': participants.length});
     final userIndex = participants.indexWhere(
-      (row) => row['user_id'] == user.id,
+      (row) => row['user_id'] == userId,
     );
     if (userIndex >= 0) {
       final score = (participants[userIndex]['score'] as num?)?.toInt() ?? 0;
@@ -442,14 +546,12 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     }
   }
 
-  final profile = await fetchCurrentUserProfile(ref);
-
   final detail = ContestDetailData(
     contest: contest,
     hasParticipated: participation != null,
     userRanking: userRanking,
     userProfile: profile,
-    participantsCount: participants.length,
+    participantsCount: participantsCount,
     prediction: prediction,
     drawSettings: drawSettings,
     hasLiveRegistration: hasLiveRegistration,
@@ -458,3 +560,30 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
 
   return detail;
 });
+
+Future<List<Map<String, dynamic>>> _fetchContestsWithLiveDuration(
+  dynamic supabase, {
+  String? contestId,
+}) async {
+  final query = supabase.from('contests').select('*, questions(time_limit)');
+  final rows = contestId == null
+      ? await query
+      : await query.eq('id', contestId);
+
+  return (rows as List<dynamic>)
+      .map((row) {
+        final json = Map<String, dynamic>.from(row as Map);
+        final questions = json.remove('questions');
+        final durationSeconds = questions is List
+            ? questions.fold<int>(0, (total, question) {
+                if (question is! Map) return total;
+                final value = question['time_limit'];
+                return total + ((value as num?)?.toInt() ?? 0);
+              })
+            : 0;
+        json['live_questions_count'] = questions is List ? questions.length : 0;
+        json['live_duration_seconds'] = durationSeconds;
+        return json;
+      })
+      .toList(growable: false);
+}

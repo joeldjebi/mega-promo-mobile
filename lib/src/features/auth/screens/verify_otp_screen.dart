@@ -9,6 +9,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/fcm_service.dart';
 import '../services/auth_profile_service.dart';
 import '../utils/app_review_auth.dart';
 import '../utils/auth_debug_logger.dart';
@@ -32,6 +33,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   int _secondsRemaining = _resendDuration;
   bool _isSubmitting = false;
   bool _isApplyingCode = false;
+  bool _isCodeComplete = false;
 
   String get _code => _controllers.map((controller) => controller.text).join();
   bool get _isComplete => _code.length == _otpLength;
@@ -82,6 +84,12 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     });
   }
 
+  void _syncCodeCompletionState() {
+    final isComplete = _isComplete;
+    if (isComplete == _isCodeComplete) return;
+    setState(() => _isCodeComplete = isComplete);
+  }
+
   void _applyOtpCode(String rawValue, {int startIndex = 0}) {
     final digits = rawValue.replaceAll(RegExp(r'\D'), '');
     if (digits.isEmpty) return;
@@ -107,7 +115,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
       _focusNodes[nextEmptyIndex].requestFocus();
     }
 
-    setState(() {});
+    _syncCodeCompletionState();
     if (_isComplete) {
       Future.microtask(_submit);
     }
@@ -126,11 +134,12 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     }
 
     if (_isComplete) {
+      _syncCodeCompletionState();
       _submit();
       return;
     }
 
-    setState(() {});
+    _syncCodeCompletionState();
   }
 
   KeyEventResult _handleBackspace(KeyEvent event, int index) {
@@ -143,7 +152,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 
     _focusNodes[index - 1].requestFocus();
     _controllers[index - 1].clear();
-    setState(() {});
+    _syncCodeCompletionState();
     return KeyEventResult.handled;
   }
 
@@ -202,6 +211,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         user,
         phone: user.phone ?? _phone,
       );
+      unawaited(FcmService.syncTokenForCurrentUser(force: true));
 
       if (!mounted) return;
       context.go(nextRoute);
@@ -280,6 +290,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         user,
         phone: _phone,
       );
+      unawaited(FcmService.syncTokenForCurrentUser(force: true));
 
       if (!mounted) return;
       context.go(nextRoute);
@@ -306,6 +317,9 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 
       for (final controller in _controllers) {
         controller.clear();
+      }
+      if (_isCodeComplete) {
+        setState(() => _isCodeComplete = false);
       }
       _focusNodes.first.requestFocus();
       _startCountdown();
@@ -346,6 +360,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 18),
@@ -389,7 +404,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
               AppButton(
                 text: 'Vérifier',
                 isLoading: _isSubmitting,
-                onPressed: _isComplete && !_isSubmitting ? _submit : null,
+                onPressed: _isCodeComplete && !_isSubmitting ? _submit : null,
               ),
               const SizedBox(height: 22),
               TextButton(

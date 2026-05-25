@@ -11,9 +11,13 @@ import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_update/services/app_update_service.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../contests/models/contest.dart';
 import '../../contests/providers/contest_providers.dart';
+import '../../contests/services/contest_asset_preload_service.dart';
 import '../../contests/widgets/contest_timer.dart';
+import '../../../services/synced_clock_service.dart';
+import '../providers/home_bootstrap_provider.dart';
 import '../providers/info_message_provider.dart';
 import '../providers/user_profile_provider.dart';
 
@@ -25,16 +29,63 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  ContestType? _selectedType;
+  String? _selectedCategoryId;
+  Timer? _liveTicker;
+  String? _preloadedContestAssetsKey;
+  UserProfile? _lastProfile;
+  List<Contest>? _lastContests;
+  Set<String>? _lastParticipatedContestIds;
+  Set<String>? _lastRegisteredLiveQuizIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveTicker?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final profile = ref.watch(userProfileProvider);
-    final contests = ref.watch(contestsProvider);
+    final bootstrap = ref.watch(homeBootstrapProvider);
+    final bootstrapData = bootstrap.asData?.value;
+    final realtimeContests = ref.watch(contestsProvider);
+    final realtimeItems = realtimeContests.asData?.value;
+    if (bootstrapData != null) {
+      _lastProfile = bootstrapData.profile;
+      _lastParticipatedContestIds = bootstrapData.participatedContestIds;
+      _lastRegisteredLiveQuizIds = bootstrapData.registeredLiveQuizIds;
+      if (realtimeItems == null) _lastContests = bootstrapData.contests;
+    }
+    if (realtimeItems != null) _lastContests = realtimeItems;
+
+    final profile = _lastProfile == null
+        ? bootstrap.whenData((data) => data.profile)
+        : AsyncData(_lastProfile!);
+    final contests = _lastContests == null
+        ? realtimeContests
+        : AsyncData(_lastContests!);
+    final categories = ref.watch(categoriesProvider);
+    final participatedAsync = ref.watch(userParticipatedContestIdsProvider);
+    final registeredAsync = ref.watch(userRegisteredLiveQuizIdsProvider);
+    final participatedValue = participatedAsync.asData?.value;
+    final registeredValue = registeredAsync.asData?.value;
+    if (participatedValue != null) {
+      _lastParticipatedContestIds = participatedValue;
+    }
+    if (registeredValue != null) {
+      _lastRegisteredLiveQuizIds = registeredValue;
+    }
     final participatedContestIds =
-        ref.watch(userParticipatedContestIdsProvider).value ?? const <String>{};
+        _lastParticipatedContestIds ?? const <String>{};
     final registeredLiveQuizIds =
-        ref.watch(userRegisteredLiveQuizIdsProvider).value ?? const <String>{};
+        _lastRegisteredLiveQuizIds ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
     final infoMessages = ref.watch(infoMessagesProvider);
 
@@ -43,12 +94,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            ref.invalidate(userProfileProvider);
-            ref.invalidate(userParticipatedContestIdsProvider);
-            ref.invalidate(userRegisteredLiveQuizIdsProvider);
+            final userId = ref.read(currentUserIdProvider);
+            clearHomeBootstrapCache(userId: userId, clearStored: true);
+            ref
+              ..invalidate(homeBootstrapProvider)
+              ..invalidate(contestsProvider)
+              ..invalidate(userParticipatedContestIdsProvider)
+              ..invalidate(userRegisteredLiveQuizIdsProvider)
+              ..invalidate(categoriesProvider);
             ref.read(contestsShuffleSeedProvider.notifier).refresh();
-            final refreshedContests = ref.refresh(contestsProvider.future);
-            await refreshedContests;
+            await Future.wait([
+              ref.refresh(homeBootstrapProvider.future),
+              ref.refresh(contestsProvider.future),
+            ]);
           },
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
@@ -58,19 +116,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 loading: () => const _HomeHeaderShimmer(),
                 error: (error, stackTrace) => const _HomeHeaderError(),
               ),
-              const SizedBox(height: 16),
-              _ContestFilters(
-                selectedType: _selectedType,
-                onSelected: (type) => setState(() => _selectedType = type),
-              ),
               const SizedBox(height: 14),
               contests.when(
                 data: (items) {
-                  final filtered = _selectedType == null
+                  _preloadContestAssets(items);
+                  final availableCategories = _categoriesWithContests(
+                    categories.value ?? const <Category>[],
+                    items,
+                  );
+                  final effectiveCategoryId = availableCategories.any(
+                    (category) => category.id == _selectedCategoryId,
+                  )
+                      ? _selectedCategoryId
+                      : null;
+                  final filtered = effectiveCategoryId == null
                       ? items
                       : items
-                            .where((contest) => contest.type == _selectedType)
+                            .where(
+                              (contest) =>
+                                  _contestCategoryId(contest) ==
+                                  effectiveCategoryId,
+                            )
                             .toList();
+
+                  if (items.isEmpty) return const _EmptyContestsState();
                   if (filtered.isEmpty) return const _EmptyContestsState();
 
                   final liveQuizzes =
@@ -83,12 +152,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ).compareTo(_liveQuizHomeRank(b));
                           if (rankCompare != 0) return rankCompare;
                           if (a.isLiveEnded && b.isLiveEnded) {
-                            return b.endsAt.compareTo(a.endsAt);
+                            return b.computedLiveEndsAt.compareTo(
+                              a.computedLiveEndsAt,
+                            );
                           }
                           final aDate =
-                              a.liveStartsAt ?? a.startsAt ?? a.endsAt;
+                              a.liveStartsAt ??
+                              a.startsAt ??
+                              a.computedLiveEndsAt;
                           final bDate =
-                              b.liveStartsAt ?? b.startsAt ?? b.endsAt;
+                              b.liveStartsAt ??
+                              b.startsAt ??
+                              b.computedLiveEndsAt;
                           return aDate.compareTo(bDate);
                         });
                   final boosted = shuffleContestsForSession(
@@ -105,6 +180,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (availableCategories.isNotEmpty) ...[
+                        _HomeCategoryFilters(
+                          categories: availableCategories,
+                          selectedCategoryId: effectiveCategoryId,
+                          onSelected: (categoryId) =>
+                              setState(() => _selectedCategoryId = categoryId),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       if (liveQuizzes.isNotEmpty) ...[
                         Text('QUIZ LIVE', style: AppTextStyles.label),
                         const SizedBox(height: 10),
@@ -211,7 +295,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 },
                 loading: () => const _ContestListShimmer(),
                 error: (error, stackTrace) => _ContestErrorState(
-                  onRetry: () => ref.invalidate(contestsProvider),
+                  onRetry: () => ref.invalidate(homeBootstrapProvider),
                 ),
               ),
             ],
@@ -220,62 +304,118 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+
+  void _preloadContestAssets(List<Contest> contests) {
+    final key = contests.take(12).map((contest) => contest.id).join('|');
+    if (key.isEmpty || key == _preloadedContestAssetsKey) return;
+    _preloadedContestAssetsKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ContestAssetPreloadService.preloadContestImages(context, contests);
+    });
+  }
 }
 
-class _ContestFilters extends StatelessWidget {
-  final ContestType? selectedType;
-  final ValueChanged<ContestType?> onSelected;
+List<Category> _categoriesWithContests(
+  List<Category> categories,
+  List<Contest> contests,
+) {
+  final contestCategoryIds = contests
+      .map(_contestCategoryId)
+      .whereType<String>()
+      .toSet();
+  return categories
+      .where((category) => contestCategoryIds.contains(category.id))
+      .toList(growable: false);
+}
 
-  const _ContestFilters({required this.selectedType, required this.onSelected});
+String? _contestCategoryId(Contest contest) {
+  return contest.categoryId ?? contest.categoryData?.id;
+}
+
+String _contestCategoryLabel(Contest contest) {
+  final category = contest.category.trim();
+  if (category.isNotEmpty && category.toLowerCase() != 'général') {
+    return category;
+  }
+  return contest.type.filterLabel;
+}
+
+class _HomeCategoryFilters extends StatelessWidget {
+  final List<Category> categories;
+  final String? selectedCategoryId;
+  final ValueChanged<String?> onSelected;
+
+  const _HomeCategoryFilters({
+    required this.categories,
+    required this.selectedCategoryId,
+    required this.onSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final filters = <({String label, ContestType? type})>[
-      (label: 'Tous', type: null),
-      (label: 'Quiz', type: ContestType.quiz),
-      (label: 'Tirage', type: ContestType.tirage),
-      (label: 'Pronostic', type: ContestType.pronostic),
-    ];
+    final filters = <Category?>[null, ...categories];
 
-    return SizedBox(
-      height: 32,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: filters.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final filter = filters[index];
-          final isSelected = selectedType == filter.type;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('CATÉGORIES', style: AppTextStyles.label),
+        const SizedBox(height: 9),
+        SizedBox(
+          height: 38,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: filters.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final category = filters[index];
+              final isSelected = category == null
+                  ? selectedCategoryId == null
+                  : selectedCategoryId == category.id;
+              final accentColor = category?.color ?? AppColors.primary;
 
-          return InkWell(
-            onTap: () => onSelected(filter.type),
-            borderRadius: BorderRadius.circular(999),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.primary : AppColors.surface,
+              return InkWell(
+                onTap: () => onSelected(category?.id),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: isSelected
-                      ? AppColors.primaryLight
-                      : AppColors.surfaceBorder,
-                ),
-              ),
-              child: Center(
-                child: Text(
-                  filter.label,
-                  style: AppTextStyles.bodySmall.copyWith(
-                    fontSize: 10.5,
-                    color: isSelected ? Colors.white : AppColors.textSecondary,
-                    fontWeight: FontWeight.w700,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? accentColor.withValues(alpha: 0.18)
+                        : AppColors.surface,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: isSelected
+                          ? accentColor.withValues(alpha: 0.58)
+                          : AppColors.surfaceBorder,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (category != null) ...[
+                        Icon(category.icon, color: accentColor, size: 15),
+                        const SizedBox(width: 6),
+                      ],
+                      Text(
+                        category?.name ?? 'Toutes',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          fontSize: 10.8,
+                          color: isSelected
+                              ? AppColors.textPrimary
+                              : AppColors.textSecondary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -466,7 +606,14 @@ class _InfoMessageCard extends ConsumerWidget {
   ) async {
     final target = message.ctaUrl.trim();
     if (target == 'app-update://store') {
-      await AppUpdateService.openCurrentPlatformStore();
+      final opened = await AppUpdateService.openCurrentPlatformStore();
+      if (!opened && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Lien de mise à jour indisponible pour ce device.'),
+          ),
+        );
+      }
       return;
     }
 
@@ -561,7 +708,7 @@ class _FeaturedContestCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Flexible(
                             child: ContestTimer(
-                              endsAt: contest.endsAt,
+                              endsAt: contest.computedLiveEndsAt,
                               style: AppTextStyles.bodySmall.copyWith(
                                 fontSize: 10,
                               ),
@@ -605,6 +752,17 @@ class _FeaturedContestCard extends StatelessWidget {
                   value: '${contest.winnersCount} gagnants',
                 ),
               ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const Spacer(),
             SizedBox(
@@ -756,7 +914,7 @@ class _LiveQuizCard extends StatelessWidget {
                       else if (hasParticipated)
                         const _ParticipatedBadge(compact: true)
                       else
-                        _CategoryBadge(label: contest.type.filterLabel),
+                        _CategoryBadge(label: _contestCategoryLabel(contest)),
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -837,23 +995,12 @@ class _LiveQuizCard extends StatelessWidget {
                                 const SizedBox(width: 6),
                                 _LiveQuizMetaChip(
                                   icon: Icons.groups_rounded,
-                                  label: '${contest.registeredCount}',
+                                  label:
+                                      '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}',
                                   muted: isEnded,
                                 ),
                               ],
                             ),
-                            if (isEnded) ...[
-                              const SizedBox(height: 5),
-                              Text(
-                                'Terminé · visible aujourd’hui',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -890,7 +1037,7 @@ class _LiveQuizCard extends StatelessWidget {
                         Expanded(
                           child: isEnded
                               ? Text(
-                                  'Terminé · visible aujourd’hui',
+                                  'Terminé',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: AppTextStyles.bodySmall.copyWith(
@@ -898,14 +1045,30 @@ class _LiveQuizCard extends StatelessWidget {
                                     fontWeight: FontWeight.w800,
                                   ),
                                 )
-                              : liveStartsAt == null
-                              ? Text(
-                                  'Départ bientôt',
-                                  style: AppTextStyles.bodySmall,
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    liveStartsAt == null
+                                        ? Text(
+                                            'Départ bientôt',
+                                            style: AppTextStyles.bodySmall,
+                                          )
+                                        : _LiveQuizStartsCountdown(
+                                            startsAt: liveStartsAt,
+                                          ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppTextStyles.bodySmall.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 )
-                              : _LiveQuizStartsCountdown(
-                                  startsAt: liveStartsAt,
-                                ),
                         ),
                         if (!isEnded) ...[
                           const SizedBox(width: 8),
@@ -1101,12 +1264,13 @@ class _CompactContestCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final participantsCount =
-        ref.watch(contestParticipantsCountProvider(contest.id)).value ?? 0;
+    final participantsCount = contest.participantsCount;
     final hasLimit = contest.maxParticipants > 0;
-    final now = DateTime.now();
+    final now = SyncedClockService.now();
     final startsAt = contest.startsAt ?? now;
-    final totalDuration = contest.endsAt.difference(startsAt).inSeconds;
+    final totalDuration = contest.computedLiveEndsAt
+        .difference(startsAt)
+        .inSeconds;
     final elapsedDuration = now.difference(startsAt).inSeconds;
     final timeProgress = totalDuration <= 0
         ? 1.0
@@ -1116,7 +1280,7 @@ class _CompactContestCard extends ConsumerWidget {
         : timeProgress;
     final progressLabel = hasLimit
         ? '$participantsCount / ${contest.maxParticipants} joueurs'
-        : '$participantsCount participant${participantsCount > 1 ? 's' : ''}';
+        : '${(timeProgress * 100).round()}%';
 
     return AppCard(
       onTap: () => context.push('/contests/${contest.id}'),
@@ -1183,10 +1347,28 @@ class _CompactContestCard extends ConsumerWidget {
                   if (hasParticipated)
                     const _ParticipatedBadge(compact: true)
                   else
-                    _CategoryBadge(label: contest.type.filterLabel),
+                    _CategoryBadge(label: _contestCategoryLabel(contest)),
                   const SizedBox(height: 8),
-                  ContestTimer(endsAt: contest.endsAt),
+                  ContestTimer(endsAt: contest.computedLiveEndsAt),
                 ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Row(
+            children: [
+              Expanded(
+                child: _ScheduleLine(
+                  icon: Icons.event_available_rounded,
+                  text: 'Fin ${_shortDateTime(contest.computedLiveEndsAt)}',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ScheduleLine(
+                  icon: Icons.emoji_events_rounded,
+                  text: '${_winnerText(contest)} après',
+                ),
               ),
             ],
           ),
@@ -1261,6 +1443,35 @@ class _SponsoredBadge extends StatelessWidget {
   }
 }
 
+class _ScheduleLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _ScheduleLine({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.textHint, size: 13),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textHint,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _LiveQuizStartsCountdown extends StatefulWidget {
   final DateTime startsAt;
 
@@ -1300,7 +1511,7 @@ class _LiveQuizStartsCountdownState extends State<_LiveQuizStartsCountdown> {
   }
 
   Duration _calculateRemaining() {
-    final remaining = widget.startsAt.difference(DateTime.now());
+    final remaining = widget.startsAt.difference(SyncedClockService.now());
     return remaining.isNegative ? Duration.zero : remaining;
   }
 
@@ -1495,6 +1706,19 @@ String _formatPrize(num value) {
   final rounded = value.round();
   if (rounded <= 0) return 'Prix surprise';
   return '$rounded FCFA';
+}
+
+String _shortDateTime(DateTime date) {
+  return 'le ${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')} à '
+      '${date.hour.toString().padLeft(2, '0')}:'
+      '${date.minute.toString().padLeft(2, '0')}';
+}
+
+String _winnerText(Contest contest) {
+  return contest.winnersCount > 1
+      ? '${contest.winnersCount} vainqueurs'
+      : '1 vainqueur';
 }
 
 class _HomeHeader extends StatelessWidget {

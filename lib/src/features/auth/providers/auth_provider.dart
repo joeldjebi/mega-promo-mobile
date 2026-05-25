@@ -27,3 +27,9 @@ final authStateProvider = StreamProvider<User?>((ref) async* {
     return state.session?.user;
   });
 });
+
+final currentUserIdProvider = Provider<String?>((ref) {
+  final authState = ref.watch(authStateProvider);
+  return authState.asData?.value?.id ??
+      ref.watch(supabaseProvider).auth.currentUser?.id;
+});

@@ -28,6 +28,10 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>MegaPromo utilise ta localisation pour sécuriser les participations et améliorer le suivi des concours.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>MegaPromo utilise ta galerie pour charger ta pièce d'identité lors de la vérification.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

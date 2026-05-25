@@ -3,6 +3,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../contests/models/contest.dart';
 
+const _shareBaseUrl = 'https://megapromo.app';
+
+String contestShareUrl(String contestId) => '$_shareBaseUrl/c/$contestId';
+
 String formatPrizeValue(num value) {
   final rounded = value.round();
   if (rounded <= 0) return 'Prix surprise';
@@ -40,7 +44,7 @@ Gagne *${contest.prizeValue.round()} FCFA* sur MegaPromo !
 Il reste ${formatRemainingText(contest.endsAt)}
 $participantsCount joueurs participent déjà
 
-Joue maintenant : https://MegaPromo.com/c/${contest.id}''';
+Joue maintenant : ${contestShareUrl(contest.id)}''';
 
   await SharePlus.instance.share(ShareParams(text: text));
 }
@@ -57,7 +61,7 @@ $contestTitle
 
 J’ai fait *$correctAnswers / $totalQuestions* et gagné *$points points* !
 
-Joue maintenant : https://MegaPromo.com''';
+Joue maintenant : $_shareBaseUrl/contests''';
 
   await SharePlus.instance.share(ShareParams(text: text));
 }

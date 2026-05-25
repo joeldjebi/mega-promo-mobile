@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../services/synced_clock_service.dart';
 
 class ContestTimer extends StatefulWidget {
   final DateTime endsAt;
@@ -59,7 +60,7 @@ class _ContestTimerState extends State<ContestTimer>
   }
 
   Duration _calculateRemaining() {
-    final remaining = widget.endsAt.difference(DateTime.now());
+    final remaining = widget.endsAt.difference(SyncedClockService.now());
     return remaining.isNegative ? Duration.zero : remaining;
   }
 

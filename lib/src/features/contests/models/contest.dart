@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../services/synced_clock_service.dart';
 
 enum ContestType {
   quiz,
@@ -82,6 +83,9 @@ class Contest {
   final int registeredCount;
   final int connectedCount;
   final int currentQuestionIndex;
+  final int liveQuestionsCount;
+  final int liveDurationSeconds;
+  final int participantsCount;
 
   const Contest({
     required this.id,
@@ -111,6 +115,9 @@ class Contest {
     required this.registeredCount,
     required this.connectedCount,
     required this.currentQuestionIndex,
+    required this.liveQuestionsCount,
+    required this.liveDurationSeconds,
+    required this.participantsCount,
   });
 
   factory Contest.fromJson(Map<String, dynamic> json) {
@@ -132,7 +139,8 @@ class Contest {
       maxParticipants: (json['max_participants'] as num?)?.toInt() ?? 0,
       startsAt: DateTime.tryParse(json['starts_at'] as String? ?? ''),
       endsAt:
-          DateTime.tryParse(json['ends_at'] as String? ?? '') ?? DateTime.now(),
+          DateTime.tryParse(json['ends_at'] as String? ?? '') ??
+          SyncedClockService.now(),
       isBoosted: json['is_boosted'] as bool? ?? false,
       viewsCount: (json['views_count'] as num?)?.toInt() ?? 0,
       sharesCount: (json['shares_count'] as num?)?.toInt() ?? 0,
@@ -144,6 +152,10 @@ class Contest {
       connectedCount: (json['connected_count'] as num?)?.toInt() ?? 0,
       currentQuestionIndex:
           (json['current_question_index'] as num?)?.toInt() ?? 0,
+      liveQuestionsCount: (json['live_questions_count'] as num?)?.toInt() ?? 0,
+      liveDurationSeconds:
+          (json['live_duration_seconds'] as num?)?.toInt() ?? 0,
+      participantsCount: (json['participants_count'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -176,6 +188,9 @@ class Contest {
       registeredCount: registeredCount,
       connectedCount: connectedCount,
       currentQuestionIndex: currentQuestionIndex,
+      liveQuestionsCount: liveQuestionsCount,
+      liveDurationSeconds: liveDurationSeconds,
+      participantsCount: participantsCount,
     );
   }
 
@@ -208,6 +223,9 @@ class Contest {
       registeredCount: registeredCount,
       connectedCount: connectedCount,
       currentQuestionIndex: currentQuestionIndex,
+      liveQuestionsCount: liveQuestionsCount,
+      liveDurationSeconds: liveDurationSeconds,
+      participantsCount: participantsCount,
     );
   }
 
@@ -228,28 +246,31 @@ class Contest {
             normalizedStatus == 'ended' ||
             normalizedStatus == 'completed' ||
             normalizedStatus == 'finished' ||
-            endsAt.isBefore(DateTime.now()));
+            !computedLiveEndsAt.isAfter(SyncedClockService.now()));
+  }
+
+  bool get isLiveReady =>
+      !isLive || (liveQuestionsCount >= 5 && liveDurationSeconds > 0);
+
+  DateTime get computedLiveEndsAt {
+    if (!isLive) return endsAt;
+    final startsAt = liveStartsAt;
+    if (startsAt == null || liveDurationSeconds <= 0) return endsAt;
+    final computedEnd = startsAt.add(Duration(seconds: liveDurationSeconds));
+    return computedEnd.isBefore(endsAt) ? computedEnd : endsAt;
   }
 
   bool get isLiveActiveNow {
     if (!isLive || isLiveEnded) return false;
-    final now = DateTime.now();
-    final normalizedStatus = liveStatus.toLowerCase();
-    return normalizedStatus == 'playing' ||
-        normalizedStatus == 'waiting' ||
-        (liveStartsAt != null &&
-            !now.isBefore(liveStartsAt!) &&
-            now.isBefore(endsAt));
+    final now = SyncedClockService.now();
+    return liveStartsAt != null &&
+        !now.isBefore(liveStartsAt!) &&
+        now.isBefore(computedLiveEndsAt);
   }
 
   bool get isLiveVisibleOnHome {
     if (!isLive) return false;
-    if (!isLiveEnded) return true;
-    final now = DateTime.now();
-    final referenceDate = liveStartsAt ?? endsAt;
-    return referenceDate.year == now.year &&
-        referenceDate.month == now.month &&
-        referenceDate.day == now.day;
+    return isLiveReady && !isLiveEnded;
   }
 
   String get accessLabel {

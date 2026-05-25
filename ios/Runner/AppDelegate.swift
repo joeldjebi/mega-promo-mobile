@@ -1,4 +1,5 @@
 import Flutter
+import FirebaseMessaging
 import UIKit
 
 @main
@@ -8,6 +9,13 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
+    if let controller = window?.rootViewController as? FlutterViewController {
+      let liveQuizActivityChannel = FlutterMethodChannel(
+        name: "mega_promo/live_quiz_activity",
+        binaryMessenger: controller.binaryMessenger
+      )
+      liveQuizActivityChannel.setMethodCallHandler(LiveQuizActivityBridge.handle)
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -23,6 +31,7 @@ import UIKit
       preview = token
     }
     print("[APNS][native] device token registered \(preview)")
+    Messaging.messaging().apnsToken = deviceToken
     super.application(
       application,
       didRegisterForRemoteNotificationsWithDeviceToken: deviceToken

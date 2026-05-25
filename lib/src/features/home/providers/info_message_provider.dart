@@ -41,8 +41,8 @@ class InfoMessage {
 
 final infoMessagesProvider = FutureProvider<List<InfoMessage>>((ref) async {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) return const <InfoMessage>[];
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return const <InfoMessage>[];
 
   final responses = await Future.wait<List<dynamic>>([
     supabase
@@ -56,7 +56,7 @@ final infoMessagesProvider = FutureProvider<List<InfoMessage>>((ref) async {
     supabase
         .from('mobile_info_message_dismissals')
         .select('message_id')
-        .eq('user_id', user.id),
+        .eq('user_id', userId),
   ]);
 
   final dismissedIds = responses[1]
@@ -103,7 +103,7 @@ Future<InfoMessage?> _recommendedUpdateMessage() async {
     body: config.message,
     imageUrl: '',
     ctaLabel: 'Mettre à jour',
-    ctaUrl: config.storeUrl,
+    ctaUrl: AppUpdateService.platformStoreUrl(configuredUrl: config.storeUrl),
     backgroundColor: '#DCD8FF',
     textColor: '#20145C',
   );

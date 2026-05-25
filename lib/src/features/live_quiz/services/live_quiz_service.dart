@@ -15,6 +15,18 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
   final user = supabase.auth.currentUser;
   if (user == null) throw StateError('Utilisateur non connecté.');
 
+  if (data.contest.isLive && !data.contest.isLiveReady) {
+    throw StateError('L’arène du Quiz Live se prépare. Reviens vite.');
+  }
+
+  if (data.contest.isLive && data.contest.isLiveEnded) {
+    throw StateError('Ce Quiz Live est terminé.');
+  }
+
+  if (data.contest.isLive && !data.contest.isLiveActiveNow) {
+    throw StateError('Ce Quiz Live n’est pas ouvert actuellement.');
+  }
+
   final existing = await supabase
       .from('participations')
       .select('id')

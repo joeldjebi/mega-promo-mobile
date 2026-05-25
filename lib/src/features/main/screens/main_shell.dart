@@ -9,9 +9,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../auth/providers/auth_provider.dart';
 import '../../contests/providers/contest_providers.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
+import '../../home/providers/info_message_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../leaderboard/providers/leaderboard_provider.dart';
 import '../../notifications/providers/notifications_provider.dart';
+import '../../profile/providers/player_payment_methods_provider.dart';
 import '../../profile/providers/profile_provider.dart';
+import '../../../services/device_session_service.dart';
+import '../../../services/device_telemetry_service.dart';
+import '../../../services/fcm_service.dart';
+import '../../../services/synced_clock_service.dart';
 import '../../rewards/providers/rewards_provider.dart';
 import '../../subscriptions/providers/player_subscription_provider.dart';
 
@@ -32,9 +40,20 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<MainShell> {
+class _MainShellState extends ConsumerState<MainShell>
+    with WidgetsBindingObserver {
   RealtimeChannel? _maintenanceChannel;
   String? _currentUserId;
+  String? _prewarmedUserId;
+  DateTime? _backgroundedAt;
+  Timer? _refreshDebounce;
+  Timer? _foregroundSyncTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,11 +68,40 @@ class _MainShellState extends ConsumerState<MainShell> {
   }
 
   void _syncMaintenanceRealtime(String? userId) {
+    _prewarmHomeBootstrap(userId);
+    _syncForegroundTimer(userId);
     if (_currentUserId == userId) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _currentUserId == userId) return;
       _subscribeMaintenanceRealtime(userId);
     });
+  }
+
+  void _syncForegroundTimer(String? userId) {
+    if (userId == null) {
+      _prewarmedUserId = null;
+      _foregroundSyncTimer?.cancel();
+      _foregroundSyncTimer = null;
+      return;
+    }
+
+    _foregroundSyncTimer ??= Timer.periodic(const Duration(seconds: 45), (_) {
+      if (mounted) _refreshPublicContestState();
+    });
+  }
+
+  void _prewarmHomeBootstrap(String? userId) {
+    if (userId == null || _prewarmedUserId == userId) return;
+    _prewarmedUserId = userId;
+    unawaited(
+      Future<void>(() async {
+        try {
+          await ref.read(homeBootstrapProvider.future);
+        } catch (_) {
+          _prewarmedUserId = null;
+        }
+      }),
+    );
   }
 
   void _subscribeMaintenanceRealtime(String? userId) {
@@ -67,17 +115,27 @@ class _MainShellState extends ConsumerState<MainShell> {
     _currentUserId = userId;
     if (userId == null) return;
 
-    void refreshAll(PostgresChangePayload payload) {
-      clearAllContestDetailCache();
+    void refreshAll(PostgresChangePayload payload) =>
+        _scheduleRefreshAppState();
+
+    void refreshPublicContestState(PostgresChangePayload payload) =>
+        _refreshPublicContestState();
+
+    void refreshRewardsImmediately(PostgresChangePayload payload) {
+      _refreshDebounce?.cancel();
+      _clearBootstrapForCurrentUser();
       ref
-        ..invalidate(userProfileProvider)
-        ..invalidate(profileDataProvider)
         ..invalidate(rewardsProvider)
-        ..invalidate(playerPlansProvider)
-        ..invalidate(contestsProvider)
-        ..invalidate(contestParticipantsCountProvider)
-        ..invalidate(contestDetailProvider)
+        ..invalidate(homeBootstrapProvider)
         ..invalidate(notificationsProvider);
+    }
+
+    void refreshNotificationsImmediately(PostgresChangePayload payload) {
+      _refreshDebounce?.cancel();
+      _clearBootstrapForCurrentUser();
+      ref
+        ..invalidate(notificationsProvider)
+        ..invalidate(homeBootstrapProvider);
     }
 
     void refreshUserIfMeaningful(PostgresChangePayload payload) {
@@ -131,13 +189,35 @@ class _MainShellState extends ConsumerState<MainShell> {
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
-          table: 'winners',
+          table: 'live_quiz_registrations',
           filter: PostgresChangeFilter(
             type: PostgresChangeFilterType.eq,
             column: 'user_id',
             value: userId,
           ),
           callback: refreshAll,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'winners',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshRewardsImmediately,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: refreshNotificationsImmediately,
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -161,16 +241,131 @@ class _MainShellState extends ConsumerState<MainShell> {
           ),
           callback: refreshAll,
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'contests',
+          callback: refreshPublicContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'questions',
+          callback: refreshPublicContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'categories',
+          callback: refreshPublicContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'contest_predictions',
+          callback: refreshPublicContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'contest_draw_settings',
+          callback: refreshPublicContestState,
+        )
         .subscribe();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshDebounce?.cancel();
+    _foregroundSyncTimer?.cancel();
     final channel = _maintenanceChannel;
     if (channel != null) {
       unawaited(Supabase.instance.client.removeChannel(channel));
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt = DateTime.now();
+      return;
+    }
+
+    if (state != AppLifecycleState.resumed) return;
+
+    final now = DateTime.now();
+    final inactiveFor = _backgroundedAt == null
+        ? Duration.zero
+        : now.difference(_backgroundedAt!);
+    _backgroundedAt = null;
+
+    unawaited(SyncedClockService.initialize());
+    unawaited(DeviceTelemetryService.syncForCurrentUser(force: true));
+    unawaited(DeviceSessionService.claimCurrentSession(force: true));
+    unawaited(FcmService.syncTokenForCurrentUser());
+
+    if (inactiveFor >= const Duration(seconds: 20)) {
+      _refreshAppState();
+      _resubscribeMaintenanceRealtime();
+    }
+  }
+
+  void _refreshAppState() {
+    _refreshDebounce?.cancel();
+    clearAllContestDetailCache();
+    _clearBootstrapForCurrentUser();
+    ref
+      ..invalidate(userProfileProvider)
+      ..invalidate(homeBootstrapProvider)
+      ..invalidate(profileDataProvider)
+      ..invalidate(playerPaymentProfileProvider)
+      ..invalidate(rewardsProvider)
+      ..invalidate(playerPlansProvider)
+      ..invalidate(contestsProvider)
+      ..invalidate(userParticipatedContestIdsProvider)
+      ..invalidate(userRegisteredLiveQuizIdsProvider)
+      ..invalidate(contestsShuffleSeedProvider)
+      ..invalidate(contestParticipantsCountProvider)
+      ..invalidate(contestDetailProvider)
+      ..invalidate(leaderboardProvider)
+      ..invalidate(notificationsProvider)
+      ..invalidate(infoMessagesProvider);
+  }
+
+  void _refreshPublicContestState() {
+    _clearBootstrapForCurrentUser();
+    clearAllContestDetailCache();
+    ref
+      ..invalidate(homeBootstrapProvider)
+      ..invalidate(contestsProvider)
+      ..invalidate(categoriesProvider)
+      ..invalidate(contestParticipantsCountProvider);
+  }
+
+  void _clearBootstrapForCurrentUser() {
+    clearHomeBootstrapCache(
+      userId: ref.read(currentUserIdProvider),
+      clearStored: true,
+    );
+  }
+
+  void _scheduleRefreshAppState() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(
+      const Duration(milliseconds: 700),
+      _refreshAppState,
+    );
+  }
+
+  void _resubscribeMaintenanceRealtime() {
+    final userId = _currentUserId;
+    if (userId == null) return;
+    _currentUserId = null;
+    _subscribeMaintenanceRealtime(userId);
   }
 }
 

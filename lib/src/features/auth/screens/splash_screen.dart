@@ -9,6 +9,7 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 
 import '../../app_update/screens/force_update_screen.dart';
 import '../../app_update/services/app_update_service.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
 import '../providers/auth_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -37,6 +38,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
     final user = ref.read(authStateProvider).asData?.value;
     if (user != null) {
+      _prewarmHomeBootstrap();
       if (mounted) {
         context.go('/home');
       }
@@ -45,6 +47,18 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         context.go('/login');
       }
     }
+  }
+
+  void _prewarmHomeBootstrap() {
+    unawaited(
+      Future<void>(() async {
+        try {
+          await ref.read(homeBootstrapProvider.future);
+        } catch (_) {
+          // Navigation must not wait on bootstrap availability.
+        }
+      }),
+    );
   }
 
   @override

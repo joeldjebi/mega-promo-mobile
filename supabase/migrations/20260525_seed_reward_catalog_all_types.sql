@@ -1,0 +1,165 @@
+-- MegaPromo - Catalogue de gains de test pour tous les types
+-- A executer dans Supabase SQL Editor apres:
+-- 20260525_create_manual_reward_fields.sql
+-- Script idempotent: cree/met a jour un gain actif par type de gain.
+
+insert into public.reward_catalog (
+  id,
+  name,
+  reward_type,
+  description,
+  value_label,
+  estimated_value,
+  partner_id,
+  default_code,
+  default_delivery_instructions,
+  terms,
+  stock_quantity,
+  used_quantity,
+  is_active,
+  metadata,
+  created_at,
+  updated_at
+)
+values
+  (
+    '20260525-0000-4000-a000-000000000101'::uuid,
+    'Credit Mobile Money 1 000 FCFA',
+    'mobile_money',
+    'Credit envoye manuellement au gagnant par Mobile Money.',
+    '1 000 FCFA Mobile Money',
+    1000,
+    null,
+    null,
+    'Verifier le numero Mobile Money du gagnant puis envoyer le montant.',
+    'Valable uniquement pour un numero Mobile Money actif.',
+    null,
+    0,
+    true,
+    '{"seed": true, "delivery": "manual_mobile_money"}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '20260525-0000-4000-a000-000000000102'::uuid,
+    'Code reduction 20%',
+    'discount_code',
+    'Code promotionnel a remettre au gagnant.',
+    'Code reduction -20%',
+    2000,
+    null,
+    'MEGA20',
+    'Envoyer le code au gagnant apres validation du resultat.',
+    'Code utilisable une seule fois selon les conditions du partenaire.',
+    100,
+    0,
+    true,
+    '{"seed": true, "discount_percent": 20}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '20260525-0000-4000-a000-000000000103'::uuid,
+    'Bon de reduction 5 000 FCFA',
+    'voucher',
+    'Bon de reduction manuel a presenter chez un partenaire.',
+    'Bon de reduction 5 000 FCFA',
+    5000,
+    null,
+    'BON5000',
+    'Remettre le code ou le bon numerique au gagnant.',
+    'Bon non remboursable, valable selon les conditions du partenaire.',
+    50,
+    0,
+    true,
+    '{"seed": true, "voucher_value": 5000}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '20260525-0000-4000-a000-000000000104'::uuid,
+    'Ticket concert VIP',
+    'concert_ticket',
+    'Ticket ou invitation pour un concert/evenement.',
+    'Ticket concert VIP',
+    10000,
+    null,
+    'VIP-CONCERT',
+    'Contacter le gagnant pour confirmer son identite et lui remettre le ticket.',
+    'Ticket personnel, non remboursable et soumis aux regles de l evenement.',
+    10,
+    0,
+    true,
+    '{"seed": true, "ticket_category": "vip"}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '20260525-0000-4000-a000-000000000105'::uuid,
+    'Lot physique surprise',
+    'physical_item',
+    'Produit physique a remettre au gagnant.',
+    'Lot physique surprise',
+    15000,
+    null,
+    null,
+    'Appeler le gagnant pour organiser la remise du lot.',
+    'Le gagnant doit presenter une piece d identite lors de la remise.',
+    5,
+    0,
+    true,
+    '{"seed": true, "requires_pickup": true}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '20260525-0000-4000-a000-000000000106'::uuid,
+    'Gain manuel special',
+    'manual',
+    'Gain libre traite manuellement par le SA.',
+    'Gain manuel special',
+    0,
+    null,
+    null,
+    'Definir la remise directement avec le gagnant.',
+    'Conditions definies par le SA selon le concours.',
+    null,
+    0,
+    true,
+    '{"seed": true, "manual_review": true}'::jsonb,
+    now(),
+    now()
+  )
+on conflict (id) do update set
+  name = excluded.name,
+  reward_type = excluded.reward_type,
+  description = excluded.description,
+  value_label = excluded.value_label,
+  estimated_value = excluded.estimated_value,
+  partner_id = excluded.partner_id,
+  default_code = excluded.default_code,
+  default_delivery_instructions = excluded.default_delivery_instructions,
+  terms = excluded.terms,
+  stock_quantity = excluded.stock_quantity,
+  is_active = true,
+  metadata = excluded.metadata,
+  updated_at = now();
+
+select
+  reward_catalog.id,
+  reward_catalog.name,
+  reward_catalog.reward_type,
+  reward_catalog.value_label,
+  reward_catalog.estimated_value,
+  reward_catalog.stock_quantity,
+  reward_catalog.is_active
+from public.reward_catalog
+where reward_catalog.id in (
+  '20260525-0000-4000-a000-000000000101'::uuid,
+  '20260525-0000-4000-a000-000000000102'::uuid,
+  '20260525-0000-4000-a000-000000000103'::uuid,
+  '20260525-0000-4000-a000-000000000104'::uuid,
+  '20260525-0000-4000-a000-000000000105'::uuid,
+  '20260525-0000-4000-a000-000000000106'::uuid
+)
+order by reward_catalog.reward_type, reward_catalog.name;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/providers/auth_provider.dart';
@@ -78,38 +80,42 @@ bool _isToday(String? value) {
       date.day == now.day;
 }
 
-Future<UserProfile> fetchCurrentUserProfile(Ref ref) async {
+Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
+  final resolvedUserId = userId ?? supabase.auth.currentUser?.id;
 
-  if (user == null) {
+  if (resolvedUserId == null) {
     throw StateError('Utilisateur non connecté.');
   }
 
-  authLogPayload('userProfileFetch', {'id': user.id});
-  final data = await supabase
+  authLogPayload('userProfileFetch', {'id': resolvedUserId});
+  final profileFuture = supabase
       .from('users')
       .select(
         'id, phone, username, avatar_url, is_premium, points_total, participations_today, last_participation_date',
       )
-      .eq('id', user.id)
+      .eq('id', resolvedUserId)
       .single();
+
+  authLogPayload('userActiveSubscriptionFetch', {'userId': resolvedUserId});
+  final subscriptionFuture = supabase
+      .from('player_subscriptions')
+      .select(
+        'id, status, expires_at, player_plans(key, name, daily_participation_limit, bonus_tickets, badge_multiplier)',
+      )
+      .eq('user_id', resolvedUserId)
+      .eq('status', 'active')
+      .gte('expires_at', DateTime.now().toIso8601String())
+      .order('created_at', ascending: false)
+      .limit(1)
+      .maybeSingle();
+
+  final data = await profileFuture;
   authLogResponse('userProfileFetch', data);
 
   Map<String, dynamic>? activeSubscription;
   try {
-    authLogPayload('userActiveSubscriptionFetch', {'userId': user.id});
-    activeSubscription = await supabase
-        .from('player_subscriptions')
-        .select(
-          'id, status, expires_at, player_plans(key, name, daily_participation_limit, bonus_tickets, badge_multiplier)',
-        )
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .gte('expires_at', DateTime.now().toIso8601String())
-        .order('created_at', ascending: false)
-        .limit(1)
-        .maybeSingle();
+    activeSubscription = await subscriptionFuture;
     authLogResponse('userActiveSubscriptionFetch', activeSubscription);
   } catch (error, stackTrace) {
     authLogError('userActiveSubscriptionFetch', error, stackTrace);
@@ -121,5 +127,10 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref) async {
 final userProfileProvider = FutureProvider.autoDispose<UserProfile>((
   ref,
 ) async {
-  return fetchCurrentUserProfile(ref);
+  final userId = ref.watch(currentUserIdProvider);
+  final keepAliveLink = ref.keepAlive();
+  final cacheTimer = Timer(const Duration(seconds: 45), keepAliveLink.close);
+  ref.onDispose(cacheTimer.cancel);
+
+  return fetchCurrentUserProfile(ref, userId: userId);
 });

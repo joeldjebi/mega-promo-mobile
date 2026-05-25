@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'live_quiz_live_activity_service.dart';
+
 class LiveQuizNotificationService {
   LiveQuizNotificationService._();
 
@@ -38,8 +40,22 @@ class LiveQuizNotificationService {
     required String contestId,
     required String title,
     required DateTime startsAt,
+    String prizeLabel = 'Gain surprise',
+    int registeredCount = 0,
+    int connectedCount = 0,
+    bool showClassicNotification = true,
   }) async {
     await initialize();
+    await LiveQuizLiveActivityService.startOrUpdateWaiting(
+      contestId: contestId,
+      title: title,
+      startsAt: startsAt,
+      prizeLabel: prizeLabel,
+      registeredCount: registeredCount,
+      connectedCount: connectedCount,
+    );
+
+    if (!showClassicNotification) return;
     if (!_initialized) return;
 
     final time =
@@ -75,6 +91,7 @@ class LiveQuizNotificationService {
   }
 
   static Future<void> cancelWaitingNotification(String contestId) async {
+    await LiveQuizLiveActivityService.end(contestId);
     if (!_initialized) return;
     await _notifications.cancel(_notificationId(contestId));
   }

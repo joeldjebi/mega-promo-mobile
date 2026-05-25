@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,13 +13,17 @@ import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../auth/providers/auth_provider.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../live_quiz/services/live_quiz_service.dart';
 import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/live_quiz_notification_service.dart';
+import '../../../services/synced_clock_service.dart';
 import '../../social/share_helpers.dart';
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
+import '../services/contest_asset_preload_service.dart';
 import '../widgets/contest_timer.dart';
 
 class ContestDetailScreen extends ConsumerStatefulWidget {
@@ -31,13 +36,20 @@ class ContestDetailScreen extends ConsumerStatefulWidget {
       _ContestDetailScreenState();
 }
 
-class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
+class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
+    with WidgetsBindingObserver {
   RealtimeChannel? _refreshChannel;
   String? _currentUserId;
+  Timer? _liveTicker;
+  DateTime? _backgroundedAt;
+  late final DateTime _openedAt;
+  String? _preloadedContestAssetId;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _openedAt = DateTime.now();
     unawaited(
       AppTelemetryService.setScreen(
         'ContestDetailScreen',
@@ -45,6 +57,9 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
       ),
     );
     unawaited(AppTelemetryService.setContext({'contest_id': widget.contestId}));
+    _liveTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -57,7 +72,10 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: detail.when(
-        data: (data) => _ContestDetailBody(data: data),
+        data: (data) {
+          _preloadContestAssets(data.contest);
+          return _ContestDetailBody(data: data);
+        },
         loading: () => const _ContestDetailShimmer(),
         error: (error, stackTrace) => _ContestDetailError(
           error: error,
@@ -68,6 +86,15 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
         ),
       ),
     );
+  }
+
+  void _preloadContestAssets(Contest contest) {
+    if (_preloadedContestAssetId == contest.id) return;
+    _preloadedContestAssetId = contest.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ContestAssetPreloadService.preloadContestImage(context, contest);
+    });
   }
 
   void _syncRealtimeRefresh(String? userId) {
@@ -91,10 +118,49 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
 
     void refreshContestState(PostgresChangePayload payload) {
       clearContestDetailCache(widget.contestId);
+      clearHomeBootstrapCache(
+        userId: ref.read(currentUserIdProvider),
+        clearStored: true,
+      );
       ref
         ..invalidate(userProfileProvider)
+        ..invalidate(homeBootstrapProvider)
         ..invalidate(contestsProvider)
+        ..invalidate(userParticipatedContestIdsProvider)
+        ..invalidate(userRegisteredLiveQuizIdsProvider)
         ..invalidate(contestDetailProvider(widget.contestId));
+    }
+
+    void refreshUserIfMeaningful(PostgresChangePayload payload) {
+      const ignoredKeys = {
+        'active_device_session_id',
+        'active_device_info',
+        'active_device_seen_at',
+        'device_info',
+        'device_location',
+        'device_last_seen_at',
+        'updated_at',
+        'fcm_token',
+      };
+      if (!_hasMeaningfulRealtimeChange(payload, ignoredKeys: ignoredKeys)) {
+        return;
+      }
+      refreshContestState(payload);
+    }
+
+    void refreshContestIfMeaningful(PostgresChangePayload payload) {
+      if (DateTime.now().difference(_openedAt) < const Duration(seconds: 3)) {
+        return;
+      }
+      const ignoredKeys = {
+        'views_count',
+        'unique_views_count',
+        'updated_at',
+      };
+      if (!_hasMeaningfulRealtimeChange(payload, ignoredKeys: ignoredKeys)) {
+        return;
+      }
+      refreshContestState(payload);
     }
 
     _refreshChannel = supabase
@@ -108,7 +174,7 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
             column: 'id',
             value: userId,
           ),
-          callback: refreshContestState,
+          callback: refreshUserIfMeaningful,
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -121,11 +187,105 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
           ),
           callback: refreshContestState,
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'contests',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: widget.contestId,
+          ),
+          callback: refreshContestIfMeaningful,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'live_quiz_registrations',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'contest_id',
+            value: widget.contestId,
+          ),
+          callback: refreshContestState,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'live_sessions',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'contest_id',
+            value: widget.contestId,
+          ),
+          callback: refreshContestState,
+        )
         .subscribe();
+  }
+
+  bool _hasMeaningfulRealtimeChange(
+    PostgresChangePayload payload, {
+    required Set<String> ignoredKeys,
+  }) {
+    final oldRecord = payload.oldRecord;
+    final newRecord = payload.newRecord;
+    if (oldRecord.isEmpty || newRecord.isEmpty) return true;
+
+    return newRecord.keys.any((key) {
+      if (ignoredKeys.contains(key)) return false;
+      return oldRecord[key] != newRecord[key];
+    });
+  }
+
+  void _refreshDetailState() {
+    clearContestDetailCache(widget.contestId);
+    clearHomeBootstrapCache(
+      userId: ref.read(currentUserIdProvider),
+      clearStored: true,
+    );
+    ref
+      ..invalidate(userProfileProvider)
+      ..invalidate(homeBootstrapProvider)
+      ..invalidate(contestsProvider)
+      ..invalidate(userParticipatedContestIdsProvider)
+      ..invalidate(userRegisteredLiveQuizIdsProvider)
+      ..invalidate(contestDetailProvider(widget.contestId));
+  }
+
+  void _resubscribeRealtimeRefresh() {
+    final userId = _currentUserId;
+    if (userId == null) return;
+    _currentUserId = null;
+    _subscribeRealtimeRefresh(userId);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt = DateTime.now();
+      return;
+    }
+
+    if (state != AppLifecycleState.resumed) return;
+
+    final inactiveFor = _backgroundedAt == null
+        ? Duration.zero
+        : DateTime.now().difference(_backgroundedAt!);
+    _backgroundedAt = null;
+
+    if (inactiveFor >= const Duration(seconds: 20)) {
+      unawaited(SyncedClockService.initialize());
+      _refreshDetailState();
+      _resubscribeRealtimeRefresh();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _liveTicker?.cancel();
     final channel = _refreshChannel;
     if (channel != null) {
       unawaited(Supabase.instance.client.removeChannel(channel));
@@ -134,10 +294,19 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen> {
   }
 }
 
-class _ContestDetailBody extends ConsumerWidget {
+class _ContestDetailBody extends ConsumerStatefulWidget {
   final ContestDetailData data;
 
   const _ContestDetailBody({required this.data});
+
+  @override
+  ConsumerState<_ContestDetailBody> createState() => _ContestDetailBodyState();
+}
+
+class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
+  bool _isActionRunning = false;
+
+  ContestDetailData get data => widget.data;
 
   bool get _dailyLimitReached =>
       data.userProfile.participationsToday >=
@@ -149,16 +318,15 @@ class _ContestDetailBody extends ConsumerWidget {
   bool get _isWaitingRoomOpen {
     final liveStartsAt = data.contest.liveStartsAt;
     if (liveStartsAt == null) return false;
-    final now = DateTime.now();
-    return now.isAfter(liveStartsAt.subtract(const Duration(minutes: 5))) &&
-        now.isBefore(liveStartsAt);
+    return SyncedClockService.now().isBefore(liveStartsAt);
   }
 
   bool get _canStartLiveQuiz {
     final liveStartsAt = data.contest.liveStartsAt;
     if (liveStartsAt == null) return false;
-    final now = DateTime.now();
-    return !now.isBefore(liveStartsAt) && now.isBefore(data.contest.endsAt);
+    final now = SyncedClockService.now();
+    return !now.isBefore(liveStartsAt) &&
+        now.isBefore(data.contest.computedLiveEndsAt);
   }
 
   bool get _isLiveRegisteredAndWaiting =>
@@ -170,12 +338,15 @@ class _ContestDetailBody extends ConsumerWidget {
 
   bool get _isActionDisabled =>
       _planAccessDenied ||
+      (data.contest.isLive && !data.contest.isLiveReady) ||
+      data.contest.isLiveEnded ||
       _isLiveRegisteredAndWaiting ||
       (!data.contest.isLive && _dailyLimitReached);
 
   String get _buttonText {
     if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
     if (data.contest.isLive) {
+      if (!data.contest.isLiveReady) return 'Arène en préparation';
       if (data.contest.isLiveEnded) return 'Quiz Live terminé';
       if (!data.hasLiveRegistration) return 'Réserver ma place';
       if (_isWaitingRoomOpen) return 'Entrer en salle d’attente';
@@ -191,7 +362,14 @@ class _ContestDetailBody extends ConsumerWidget {
 
   void _refreshParticipationState(WidgetRef ref) {
     clearContestDetailCache(data.contest.id);
+    clearHomeBootstrapCache(
+      userId: ref.read(currentUserIdProvider),
+      clearStored: true,
+    );
     ref.invalidate(userProfileProvider);
+    ref.invalidate(homeBootstrapProvider);
+    ref.invalidate(userParticipatedContestIdsProvider);
+    ref.invalidate(userRegisteredLiveQuizIdsProvider);
     ref.invalidate(contestDetailProvider(data.contest.id));
   }
 
@@ -209,7 +387,14 @@ class _ContestDetailBody extends ConsumerWidget {
     }
   }
 
-  Future<void> _participate(BuildContext context, WidgetRef ref) async {
+  Future<void> _participate(BuildContext context) async {
+    if (_isActionRunning) return;
+    setState(() => _isActionRunning = true);
+
+    Future<void> stopLoading() async {
+      if (mounted) setState(() => _isActionRunning = false);
+    }
+
     if (_planAccessDenied) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -218,14 +403,26 @@ class _ContestDetailBody extends ConsumerWidget {
           ),
         ),
       );
+      await stopLoading();
       return;
     }
 
     if (data.contest.isLive) {
+      if (!data.contest.isLiveReady) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('L’arène du Quiz Live se prépare. Reviens vite.'),
+          ),
+        );
+        await stopLoading();
+        return;
+      }
+
       if (data.contest.isLiveEnded) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Ce Quiz Live est terminé.')),
         );
+        await stopLoading();
         return;
       }
 
@@ -236,21 +433,28 @@ class _ContestDetailBody extends ConsumerWidget {
             'register_live_quiz',
             params: {'p_contest_id': data.contest.id},
           );
-          if (_isWaitingRoomOpen) {
-            await supabase.rpc(
-              'join_live_quiz_waiting_room',
-              params: {'p_contest_id': data.contest.id},
+          await supabase.rpc(
+            'join_live_quiz_waiting_room',
+            params: {'p_contest_id': data.contest.id},
+          );
+          final startsAt = data.contest.liveStartsAt;
+          if (startsAt != null) {
+            unawaited(
+              LiveQuizNotificationService.showWaitingNotification(
+                contestId: data.contest.id,
+                title: data.contest.title,
+                startsAt: startsAt,
+                prizeLabel: _formatPrize(data.contest.prizeValue),
+                registeredCount: data.contest.registeredCount + 1,
+                connectedCount: data.contest.connectedCount,
+                showClassicNotification:
+                    defaultTargetPlatform != TargetPlatform.iOS,
+              ),
             );
-            _refreshParticipationState(ref);
-            if (!context.mounted) return;
-            context.go('/contests/${data.contest.id}/live-waiting');
-            return;
           }
           _refreshParticipationState(ref);
           if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Inscription au Quiz Live validée.')),
-          );
+          context.go('/contests/${data.contest.id}/live-waiting');
           return;
         }
 
@@ -278,7 +482,7 @@ class _ContestDetailBody extends ConsumerWidget {
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Reviens 5 minutes avant le début du Quiz Live.'),
+            content: Text('La salle d’attente est disponible avant le départ.'),
           ),
         );
       } catch (error, stackTrace) {
@@ -295,6 +499,8 @@ class _ContestDetailBody extends ConsumerWidget {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(message)));
+      } finally {
+        await stopLoading();
       }
       return;
     }
@@ -302,7 +508,10 @@ class _ContestDetailBody extends ConsumerWidget {
     if (data.contest.type == ContestType.quiz) {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        await stopLoading();
+        return;
+      }
 
       try {
         final participation = await supabase
@@ -345,6 +554,8 @@ class _ContestDetailBody extends ConsumerWidget {
           ),
         );
         _refreshParticipationState(ref);
+      } finally {
+        await stopLoading();
       }
       return;
     }
@@ -360,6 +571,7 @@ class _ContestDetailBody extends ConsumerWidget {
         builder: (context) =>
             _PredictionParticipationSheet(data: data, ref: ref),
       );
+      await stopLoading();
       return;
     }
 
@@ -372,10 +584,11 @@ class _ContestDetailBody extends ConsumerWidget {
       ),
       builder: (context) => _DrawParticipationSheet(data: data, ref: ref),
     );
+    await stopLoading();
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final contest = data.contest;
 
     if (contest.isLiveEnded) {
@@ -483,12 +696,18 @@ class _ContestDetailBody extends ConsumerWidget {
                           child: _DetailStat(
                             icon: Icons.schedule_rounded,
                             label: 'Temps',
-                            child: ContestTimer(endsAt: contest.endsAt),
+                            child: contest.isLive
+                                ? _LiveQuizDetailTime(contest: contest)
+                                : ContestTimer(
+                                    endsAt: contest.computedLiveEndsAt,
+                                  ),
                           ),
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _ContestScheduleCard(data: data),
                   if (contest.isLive) ...[
                     const SizedBox(height: 14),
                     AppCard(
@@ -621,11 +840,12 @@ class _ContestDetailBody extends ConsumerWidget {
             top: false,
             child: AppButton(
               text: _buttonText,
-              onPressed: _isActionDisabled
+              isLoading: _isActionRunning,
+              onPressed: _isActionDisabled || _isActionRunning
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
-                  : () => _participate(context, ref),
+                  : () => _participate(context),
             ),
           ),
         ),
@@ -707,7 +927,7 @@ class _EndedLiveQuizDetail extends StatelessWidget {
               child: Column(
                 children: [
                   Text(
-                    'Ce Quiz Live n’est plus accessible. Il reste visible quelques heures pour information, puis disparaîtra automatiquement de l’accueil.',
+                    'Ce Quiz Live n’est plus accessible. Retourne à l’accueil pour voir les concours disponibles.',
                     textAlign: TextAlign.center,
                     style: AppTextStyles.bodySecondary,
                   ),
@@ -741,6 +961,96 @@ class _EndedLiveQuizDetail extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ContestScheduleCard extends StatelessWidget {
+  final ContestDetailData data;
+
+  const _ContestScheduleCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final contest = data.contest;
+    final startsAt = contest.isLive ? contest.liveStartsAt : contest.startsAt;
+    final endsAt = contest.computedLiveEndsAt;
+    final winnerAnnouncementAt =
+        data.drawSettings?.winnerAnnouncementAt ?? endsAt;
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Calendrier du jeu', style: AppTextStyles.h3),
+          const SizedBox(height: 12),
+          if (startsAt != null)
+            _ScheduleRow(
+              icon: contest.isLive
+                  ? Icons.play_circle_rounded
+                  : Icons.event_available_rounded,
+              label: contest.isLive ? 'Départ du QL' : 'Ouverture',
+              value: _shortDateTime(startsAt),
+            ),
+          _ScheduleRow(
+            icon: Icons.flag_circle_rounded,
+            label: 'Fin du jeu',
+            value: _shortDateTime(endsAt),
+          ),
+          _ScheduleRow(
+            icon: Icons.emoji_events_rounded,
+            label: _winnerText(contest),
+            value: contest.isLive
+                ? 'À la fin du QL'
+                : _shortDateTime(winnerAnnouncementAt),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScheduleRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _ScheduleRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.primaryLight, size: 19),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -886,6 +1196,13 @@ class _DrawParticipationSheetState
       );
 
       widget.ref.invalidate(userProfileProvider);
+      clearHomeBootstrapCache(
+        userId: widget.ref.read(currentUserIdProvider),
+        clearStored: true,
+      );
+      widget.ref.invalidate(homeBootstrapProvider);
+      widget.ref.invalidate(userParticipatedContestIdsProvider);
+      widget.ref.invalidate(userRegisteredLiveQuizIdsProvider);
       clearContestDetailCache(widget.data.contest.id);
       widget.ref.invalidate(contestDetailProvider(widget.data.contest.id));
 
@@ -905,10 +1222,10 @@ class _DrawParticipationSheetState
     final tickets = _drawTickets(widget.data);
     final confirmationMessage =
         widget.data.drawSettings?.confirmationMessage ??
-        'Les gagnants seront annoncés le ${_shortDate(widget.data.contest.endsAt)}.';
+        'Les gagnants seront annoncés ${_shortDateTime(widget.data.contest.computedLiveEndsAt)}.';
     final winnerDate =
         widget.data.drawSettings?.winnerAnnouncementAt ??
-        widget.data.contest.endsAt;
+        widget.data.contest.computedLiveEndsAt;
 
     return SafeArea(
       child: Padding(
@@ -966,7 +1283,7 @@ class _DrawParticipationSheetState
               Padding(
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(
-                  'Annonce prévue le ${_shortDate(winnerDate)}',
+                  'Annonce prévue ${_shortDateTime(winnerDate)}',
                   textAlign: TextAlign.center,
                   style: AppTextStyles.bodySmall,
                 ),
@@ -1113,6 +1430,13 @@ class _PredictionParticipationSheetState
       );
 
       widget.ref.invalidate(userProfileProvider);
+      clearHomeBootstrapCache(
+        userId: widget.ref.read(currentUserIdProvider),
+        clearStored: true,
+      );
+      widget.ref.invalidate(homeBootstrapProvider);
+      widget.ref.invalidate(userParticipatedContestIdsProvider);
+      widget.ref.invalidate(userRegisteredLiveQuizIdsProvider);
       clearContestDetailCache(widget.data.contest.id);
       widget.ref.invalidate(contestDetailProvider(widget.data.contest.id));
 
@@ -1605,6 +1929,33 @@ class _DetailStat extends StatelessWidget {
   }
 }
 
+class _LiveQuizDetailTime extends StatelessWidget {
+  final Contest contest;
+
+  const _LiveQuizDetailTime({required this.contest});
+
+  @override
+  Widget build(BuildContext context) {
+    final liveStartsAt = contest.liveStartsAt;
+    if (liveStartsAt == null) {
+      return Text('À confirmer', style: AppTextStyles.h3);
+    }
+
+    final now = SyncedClockService.now();
+    if (contest.isLiveEnded) {
+      return Text('Terminé', style: AppTextStyles.h3);
+    }
+    if (!now.isBefore(liveStartsAt)) {
+      return Text(
+        'En direct',
+        style: AppTextStyles.h3.copyWith(color: AppColors.accentGreen),
+      );
+    }
+
+    return ContestTimer(endsAt: liveStartsAt);
+  }
+}
+
 class _StatDivider extends StatelessWidget {
   const _StatDivider();
 
@@ -1724,19 +2075,31 @@ String _shortDate(DateTime date) {
       '${date.month.toString().padLeft(2, '0')}/${date.year}';
 }
 
+String _shortDateTime(DateTime date) {
+  return 'le ${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')} à '
+      '${date.hour.toString().padLeft(2, '0')}:'
+      '${date.minute.toString().padLeft(2, '0')}';
+}
+
+String _winnerText(Contest contest) {
+  return contest.winnersCount > 1
+      ? '${contest.winnersCount} vainqueurs'
+      : '1 vainqueur';
+}
+
+String _winnerDesignationText(Contest contest) {
+  return contest.winnersCount > 1
+      ? '${contest.winnersCount} vainqueurs désignés'
+      : '1 vainqueur désigné';
+}
+
 String _liveQuizInfoText(Contest contest) {
   final liveStartsAt = contest.liveStartsAt;
   if (liveStartsAt == null) {
     return 'L’heure de départ sera confirmée bientôt.';
   }
 
-  final date =
-      '${liveStartsAt.day.toString().padLeft(2, '0')}/'
-      '${liveStartsAt.month.toString().padLeft(2, '0')}/${liveStartsAt.year}';
-  final time =
-      '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
-      '${liveStartsAt.minute.toString().padLeft(2, '0')}';
-
-  return 'Départ le $date à $time. Salle d’attente ouverte 5 minutes avant. '
-      '${contest.registeredCount} joueur(s) inscrit(s).';
+  return 'Départ ${_shortDateTime(liveStartsAt)}. Fin ${_shortDateTime(contest.computedLiveEndsAt)}. '
+      '${_winnerDesignationText(contest)} à la fin. ${contest.registeredCount} joueur(s) inscrit(s).';
 }

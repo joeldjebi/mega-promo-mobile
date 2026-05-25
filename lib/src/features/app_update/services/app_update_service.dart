@@ -48,6 +48,8 @@ class AppUpdateService {
 
   static const String androidFallbackStoreUrl =
       'https://play.google.com/store/apps/details?id=com.moyoo.megapromo';
+  static const String iosFallbackStoreUrl =
+      'https://apps.apple.com/search?term=MegaPromo';
 
   static Future<AppUpdateStatus> check() async {
     try {
@@ -95,21 +97,22 @@ class AppUpdateService {
   }
 
   static Future<bool> openStore(AppUpdateConfig config) async {
-    final url = config.storeUrl.trim().isNotEmpty
-        ? config.storeUrl.trim()
-        : fallbackStoreUrl;
+    final url = platformStoreUrl(configuredUrl: config.storeUrl);
     if (url.isEmpty) return false;
     return openStoreUrl(url);
   }
 
   static Future<bool> openCurrentPlatformStore() async {
     final status = await check();
-    final storeUrl = status.config?.storeUrl.trim();
-    final url = storeUrl != null && storeUrl.isNotEmpty
-        ? storeUrl
-        : fallbackStoreUrl;
+    final url = platformStoreUrl(configuredUrl: status.config?.storeUrl);
     if (url.isEmpty) return false;
     return openStoreUrl(url);
+  }
+
+  static String platformStoreUrl({String? configuredUrl}) {
+    final storeUrl = configuredUrl?.trim();
+    if (storeUrl != null && storeUrl.isNotEmpty) return storeUrl;
+    return fallbackStoreUrl;
   }
 
   static Future<bool> openStoreUrl(String url) async {
@@ -121,6 +124,7 @@ class AppUpdateService {
   static String get fallbackStoreUrl {
     if (kIsWeb) return '';
     if (Platform.isAndroid) return androidFallbackStoreUrl;
+    if (Platform.isIOS) return iosFallbackStoreUrl;
     return '';
   }
 

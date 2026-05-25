@@ -10,67 +10,113 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../home/screens/home_screen.dart';
 import '../providers/leaderboard_provider.dart';
 
-class LeaderboardScreen extends ConsumerWidget {
+class LeaderboardScreen extends ConsumerStatefulWidget {
   final String? contestId;
 
   const LeaderboardScreen({super.key, this.contestId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final leaderboard = ref.watch(leaderboardProvider(contestId));
+  ConsumerState<LeaderboardScreen> createState() => _LeaderboardScreenState();
+}
+
+class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
+  LeaderboardScope _scope = LeaderboardScope.system;
+  final Map<LeaderboardRequest, LeaderboardData> _lastLeaderboardData = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final request = widget.contestId == null
+        ? (_scope == LeaderboardScope.liveQuiz
+              ? const LeaderboardRequest.liveQuiz()
+              : const LeaderboardRequest.system())
+        : LeaderboardRequest.contest(widget.contestId!);
+    final watchedLeaderboard = ref.watch(leaderboardProvider(request));
+    final latestLeaderboard = watchedLeaderboard.asData?.value;
+    if (latestLeaderboard != null) {
+      _lastLeaderboardData[request] = latestLeaderboard;
+    }
+    final cachedLeaderboard = _lastLeaderboardData[request];
+    final leaderboard = cachedLeaderboard == null
+        ? watchedLeaderboard
+        : AsyncData(cachedLeaderboard);
     final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    final hasContest = widget.contestId != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: leaderboard.when(
-          data: (users) {
+          data: (data) {
+            final users = data.users;
             final currentUserIndex = users.indexWhere(
               (user) => user.id == currentUserId,
             );
-            final shouldPinCurrentUser = currentUserIndex >= 10;
+            final podiumUsers = users.take(3).toList();
+            final otherUsers = users.skip(3).take(5).toList();
+            final currentUser = data.currentUser ??
+                (currentUserIndex >= 0 ? users[currentUserIndex] : null);
+            final currentUserRank = data.currentUserRank ??
+                currentUser?.rank ??
+                (currentUserIndex >= 0 ? currentUserIndex + 1 : null);
+            final currentUserIsOnPodium = podiumUsers.any(
+              (user) => user.id == currentUserId,
+            );
+            final currentUserIsInOtherUsers = otherUsers.any(
+              (user) => user.id == currentUserId,
+            );
+            final shouldAppendCurrentUser =
+                currentUser != null &&
+                currentUserRank != null &&
+                !currentUserIsOnPodium &&
+                !currentUserIsInOtherUsers;
+            final otherRows = <({int rank, LeaderboardUser user})>[
+              ...otherUsers.asMap().entries.map(
+                    (entry) => (
+                      rank: entry.value.rank ?? entry.key + 4,
+                      user: entry.value,
+                    ),
+                  ),
+              if (shouldAppendCurrentUser)
+                (rank: currentUserRank!, user: currentUser!),
+            ];
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
               children: [
-                _Header(hasContest: contestId != null),
-                if (contestId != null) ...[
+                _Header(
+                  hasContest: hasContest,
+                  hasLiveQuizScope: data.hasLiveQuizScope,
+                ),
+                if (!hasContest) ...[
+                  const SizedBox(height: 14),
+                  _LeaderboardScopeTabs(
+                    selectedScope: _scope,
+                    onChanged: (scope) => setState(() => _scope = scope),
+                  ),
+                ],
+                if (hasContest) ...[
                   const SizedBox(height: 14),
                   const _ContestScopeBanner(),
                 ],
                 const SizedBox(height: 20),
                 _Podium(
-                  users: users.take(3).toList(),
+                  users: podiumUsers,
                   currentUserId: currentUserId,
                 ),
-                const SizedBox(height: 22),
-                Text('AUTRES JOUEURS', style: AppTextStyles.label),
-                const SizedBox(height: 12),
-                if (users.length <= 3)
-                  const _EmptyLeaderboardState()
-                else
-                  ...users.skip(3).take(97).toList().asMap().entries.map((
-                    entry,
-                  ) {
-                    final rank = entry.key + 4;
+                if (otherRows.isNotEmpty) ...[
+                  const SizedBox(height: 22),
+                  Text('AUTRES JOUEURS', style: AppTextStyles.label),
+                  const SizedBox(height: 12),
+                  ...otherRows.map((row) {
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(bottom: 8),
                       child: _RankCard(
-                        rank: rank,
-                        user: entry.value,
-                        isCurrentUser: entry.value.id == currentUserId,
+                        rank: row.rank,
+                        user: row.user,
+                        isCurrentUser: row.user.id == currentUserId,
                       ),
                     );
                   }),
-                if (shouldPinCurrentUser) ...[
-                  const SizedBox(height: 4),
-                  Text('MON RANG', style: AppTextStyles.label),
-                  const SizedBox(height: 12),
-                  _RankCard(
-                    rank: currentUserIndex + 1,
-                    user: users[currentUserIndex],
-                    isCurrentUser: true,
-                  ),
                 ],
               ],
             );
@@ -85,8 +131,9 @@ class LeaderboardScreen extends ConsumerWidget {
 
 class _Header extends StatelessWidget {
   final bool hasContest;
+  final bool hasLiveQuizScope;
 
-  const _Header({required this.hasContest});
+  const _Header({required this.hasContest, required this.hasLiveQuizScope});
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +148,8 @@ class _Header extends StatelessWidget {
               Text(
                 hasContest
                     ? 'Les meilleurs joueurs de ce concours'
+                    : hasLiveQuizScope
+                    ? 'Les meilleurs joueurs Quiz Live'
                     : 'Les meilleurs joueurs MegaPromo',
                 style: AppTextStyles.bodySecondary,
               ),
@@ -122,6 +171,76 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LeaderboardScopeTabs extends StatelessWidget {
+  final LeaderboardScope selectedScope;
+  final ValueChanged<LeaderboardScope> onChanged;
+
+  const _LeaderboardScopeTabs({
+    required this.selectedScope,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(4),
+      borderRadius: 18,
+      child: Row(
+        children: [
+          Expanded(
+            child: _ScopeTabButton(
+              label: 'Général',
+              selected: selectedScope == LeaderboardScope.system,
+              onTap: () => onChanged(LeaderboardScope.system),
+            ),
+          ),
+          Expanded(
+            child: _ScopeTabButton(
+              label: 'Quiz Live',
+              selected: selectedScope == LeaderboardScope.liveQuiz,
+              onTap: () => onChanged(LeaderboardScope.liveQuiz),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScopeTabButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ScopeTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: selected ? null : onTap,
+      style: TextButton.styleFrom(
+        backgroundColor: selected ? AppColors.primary : Colors.transparent,
+        foregroundColor: selected ? Colors.white : AppColors.textSecondary,
+        disabledBackgroundColor: AppColors.primary,
+        disabledForegroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.bodySmall.copyWith(
+          color: selected ? Colors.white : AppColors.textSecondary,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }
@@ -355,49 +474,68 @@ class _RankCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final avatar = avatarForId(user.avatarUrl);
 
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      borderRadius: 24,
-      showGlow: isCurrentUser,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: isCurrentUser
+            ? AppColors.primary.withValues(alpha: 0.12)
+            : AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isCurrentUser
+              ? AppColors.primary.withValues(alpha: 0.48)
+              : AppColors.surfaceBorder,
+          width: isCurrentUser ? 1.2 : 0.8,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.subtleShadow,
+            blurRadius: 14,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
       child: Row(
         children: [
           SizedBox(
-            width: 28,
+            width: 24,
             child: Text(
               '$rank',
-              style: AppTextStyles.h3.copyWith(
+              style: AppTextStyles.bodySecondary.copyWith(
                 color: isCurrentUser ? AppColors.primary : AppColors.textHint,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Container(
-            width: 44,
-            height: 44,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: avatar.color.withValues(alpha: 0.14),
               shape: BoxShape.circle,
               border: Border.all(color: avatar.color.withValues(alpha: 0.20)),
             ),
-            child: Icon(avatar.icon, color: avatar.color, size: 22),
+            child: Icon(avatar.icon, color: avatar.color, size: 19),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 11),
           Expanded(
             child: Text(
               user.username,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.h3.copyWith(
+              style: AppTextStyles.bodySecondary.copyWith(
                 color: isCurrentUser
                     ? AppColors.primaryDark
                     : AppColors.textPrimary,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Text(
             '${user.points} pts',
-            style: AppTextStyles.bodySecondary.copyWith(
+            style: AppTextStyles.bodySmall.copyWith(
               color: isCurrentUser ? AppColors.primaryDark : AppColors.textHint,
               fontWeight: FontWeight.w800,
             ),
@@ -436,7 +574,7 @@ class _EmptyLeaderboardState extends StatelessWidget {
           Text('Aucun score pour l’instant', style: AppTextStyles.h2),
           const SizedBox(height: 6),
           Text(
-            'Les premiers joueurs apparaîtront ici.',
+            'Joue à un concours pour marquer tes premiers points.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary,
           ),

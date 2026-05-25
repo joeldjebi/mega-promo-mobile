@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -8,7 +10,10 @@ import 'package:mega_promo/core/widgets/app_card.dart';
 
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
+import '../services/contest_asset_preload_service.dart';
 import '../widgets/contest_timer.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
 
 enum _ContestViewMode { list, grid }
 
@@ -20,15 +25,48 @@ class ContestsScreen extends ConsumerStatefulWidget {
 }
 
 class _ContestsScreenState extends ConsumerState<ContestsScreen> {
-  ContestType? _selectedType;
   String? _selectedCategory;
   _ContestViewMode _viewMode = _ContestViewMode.list;
+  Timer? _liveTicker;
+  String? _preloadedContestAssetsKey;
+  List<Contest>? _lastContests;
+  Set<String>? _lastParticipatedContestIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveTicker?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final contests = ref.watch(contestsProvider);
+    final bootstrap = ref.watch(homeBootstrapProvider);
+    final bootstrapData = bootstrap.asData?.value;
+    final realtimeContests = ref.watch(contestsProvider);
+    final realtimeItems = realtimeContests.asData?.value;
+    if (bootstrapData != null) {
+      _lastParticipatedContestIds = bootstrapData.participatedContestIds;
+      if (realtimeItems == null) _lastContests = bootstrapData.contests;
+    }
+    if (realtimeItems != null) _lastContests = realtimeItems;
+    final contests = _lastContests == null
+        ? realtimeContests
+        : AsyncData(_lastContests!);
+    final participatedAsync = ref.watch(userParticipatedContestIdsProvider);
+    final participatedValue = participatedAsync.asData?.value;
+    if (participatedValue != null) {
+      _lastParticipatedContestIds = participatedValue;
+    }
     final participatedContestIds =
-        ref.watch(userParticipatedContestIdsProvider).value ?? const <String>{};
+        _lastParticipatedContestIds ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
 
     return Scaffold(
@@ -53,16 +91,31 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
         top: false,
         child: RefreshIndicator(
           onRefresh: () async {
+            clearHomeBootstrapCache(
+              userId: ref.read(currentUserIdProvider),
+              clearStored: true,
+            );
+            ref.invalidate(homeBootstrapProvider);
             ref.invalidate(userParticipatedContestIdsProvider);
+            ref.invalidate(userRegisteredLiveQuizIdsProvider);
+            ref.invalidate(categoriesProvider);
             ref.read(contestsShuffleSeedProvider.notifier).refresh();
+            final refreshedBootstrap = ref.refresh(
+              homeBootstrapProvider.future,
+            );
+            await refreshedBootstrap;
             final refreshed = ref.refresh(contestsProvider.future);
             await refreshed;
           },
           child: contests.when(
             data: (items) {
+              _preloadContestAssets(items);
               final categories = _categoryNames(items);
+              final effectiveCategory = categories.contains(_selectedCategory)
+                  ? _selectedCategory
+                  : null;
               final filtered = shuffleContestsForSession(
-                _filterContests(items),
+                _filterContestsByCategory(items, effectiveCategory),
                 shuffleSeed,
               );
 
@@ -78,16 +131,11 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
                     '${filtered.length} concours disponible${filtered.length > 1 ? 's' : ''}',
                     style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
                   ),
-                  const SizedBox(height: 16),
-                  _TypeFilters(
-                    selectedType: _selectedType,
-                    onSelected: (type) => setState(() => _selectedType = type),
-                  ),
                   if (categories.isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
                     _CategoryFilters(
                       categories: categories,
-                      selectedCategory: _selectedCategory,
+                      selectedCategory: effectiveCategory,
                       onSelected: (category) =>
                           setState(() => _selectedCategory = category),
                     ),
@@ -110,7 +158,15 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, stackTrace) => _ContestLoadError(
-              onRetry: () => ref.invalidate(contestsProvider),
+              onRetry: () {
+                clearHomeBootstrapCache(
+                  userId: ref.read(currentUserIdProvider),
+                  clearStored: true,
+                );
+                ref
+                  ..invalidate(homeBootstrapProvider)
+                  ..invalidate(contestsProvider);
+              },
             ),
           ),
         ),
@@ -118,14 +174,28 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
     );
   }
 
-  List<Contest> _filterContests(List<Contest> contests) {
-    return contests.where((contest) {
-      final typeMatches =
-          _selectedType == null || contest.type == _selectedType;
-      final categoryMatches =
-          _selectedCategory == null || contest.category == _selectedCategory;
-      return typeMatches && categoryMatches;
-    }).toList();
+  void _preloadContestAssets(List<Contest> contests) {
+    final key = contests.take(16).map((contest) => contest.id).join('|');
+    if (key.isEmpty || key == _preloadedContestAssetsKey) return;
+    _preloadedContestAssetsKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ContestAssetPreloadService.preloadContestImages(
+        context,
+        contests,
+        limit: 16,
+      );
+    });
+  }
+
+  List<Contest> _filterContestsByCategory(
+    List<Contest> contests,
+    String? selectedCategory,
+  ) {
+    if (selectedCategory == null) return contests;
+    return contests
+        .where((contest) => contest.category == selectedCategory)
+        .toList();
   }
 
   List<String> _categoryNames(List<Contest> contests) {
@@ -161,41 +231,6 @@ class _ViewToggleButton extends StatelessWidget {
         backgroundColor: isSelected
             ? AppColors.primary.withValues(alpha: 0.12)
             : Colors.transparent,
-      ),
-    );
-  }
-}
-
-class _TypeFilters extends StatelessWidget {
-  final ContestType? selectedType;
-  final ValueChanged<ContestType?> onSelected;
-
-  const _TypeFilters({required this.selectedType, required this.onSelected});
-
-  @override
-  Widget build(BuildContext context) {
-    final filters = <({String label, ContestType? type})>[
-      (label: 'Tous', type: null),
-      (label: 'Quiz', type: ContestType.quiz),
-      (label: 'Tirage', type: ContestType.tirage),
-      (label: 'Pronostic', type: ContestType.pronostic),
-    ];
-
-    return SizedBox(
-      height: 34,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: filters.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final filter = filters[index];
-          final isSelected = selectedType == filter.type;
-          return _FilterChipButton(
-            label: filter.label,
-            isSelected: isSelected,
-            onTap: () => onSelected(filter.type),
-          );
-        },
       ),
     );
   }
@@ -277,6 +312,37 @@ class _FilterChipButton extends StatelessWidget {
   }
 }
 
+String _contestBadgeLabel(Contest contest) {
+  if (contest.isLiveActiveNow) return 'En direct';
+  if (contest.isLive) return 'À venir';
+  return _contestCategoryLabel(contest);
+}
+
+String _contestCategoryLabel(Contest contest) {
+  final category = contest.category.trim();
+  if (category.isNotEmpty && category.toLowerCase() != 'général') {
+    return category;
+  }
+  return contest.type.filterLabel;
+}
+
+String _contestAudienceLabel(Contest contest) {
+  if (contest.isLive) {
+    return '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}';
+  }
+  return '${contest.viewsCount} vue${contest.viewsCount > 1 ? 's' : ''}';
+}
+
+DateTime _contestCountdownTarget(Contest contest) {
+  if (contest.isLive &&
+      !contest.isLiveActiveNow &&
+      !contest.isLiveEnded &&
+      contest.liveStartsAt != null) {
+    return contest.liveStartsAt!;
+  }
+  return contest.computedLiveEndsAt;
+}
+
 class _ContestList extends StatelessWidget {
   final List<Contest> contests;
   final Set<String> participatedContestIds;
@@ -344,49 +410,97 @@ class _ListContestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      onTap: () => context.push('/contests/${contest.id}'),
-      padding: const EdgeInsets.all(13),
-      borderRadius: 18,
-      child: Row(
-        children: [
-          _ContestIcon(contest: contest, size: 44),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  contest.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.h3.copyWith(fontSize: 15),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _formatPrize(contest.prizeValue),
-                  style: AppTextStyles.price.copyWith(fontSize: 14),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    if (hasParticipated)
-                      const _ParticipatedBadge()
-                    else
-                      _SmallBadge(label: contest.type.filterLabel),
-                    const SizedBox(width: 8),
-                    _InlineMeta(
-                      icon: Icons.visibility_rounded,
-                      label: '${contest.viewsCount}',
+    final isEndedLive = contest.isLiveEnded;
+    return Opacity(
+      opacity: isEndedLive ? 0.58 : 1,
+      child: AppCard(
+        onTap: isEndedLive
+            ? null
+            : () {
+                clearContestDetailCache(contest.id);
+                context.push('/contests/${contest.id}');
+              },
+        padding: const EdgeInsets.all(13),
+        borderRadius: 18,
+        child: Row(
+          children: [
+            _ContestIcon(contest: contest, size: 44, muted: isEndedLive),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    contest.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.h3.copyWith(
+                      color: isEndedLive
+                          ? AppColors.textSecondary
+                          : AppColors.textPrimary,
+                      fontSize: 15,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(child: ContestTimer(endsAt: contest.endsAt)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatPrize(contest.prizeValue),
+                    style: AppTextStyles.price.copyWith(
+                      color: isEndedLive ? AppColors.textHint : AppColors.gold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      if (isEndedLive)
+                        const _EndedLiveBadge()
+                      else if (hasParticipated)
+                        const _ParticipatedBadge()
+                      else
+                        _SmallBadge(label: _contestBadgeLabel(contest)),
+                      const SizedBox(width: 8),
+                      _InlineMeta(
+                        icon: contest.isLive
+                            ? Icons.groups_rounded
+                            : Icons.visibility_rounded,
+                        label: _contestAudienceLabel(contest),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: isEndedLive
+                            ? Text(
+                                'Terminé',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textHint,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              )
+                            : ContestTimer(
+                                endsAt: _contestCountdownTarget(contest),
+                              ),
+                      ),
+                    ],
+                  ),
+                  if (!isEndedLive) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textHint,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -403,53 +517,103 @@ class _GridContestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      onTap: () => context.push('/contests/${contest.id}'),
-      padding: const EdgeInsets.all(12),
-      borderRadius: 18,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _ContestIcon(contest: contest, size: 40),
-              const Spacer(),
-              if (hasParticipated)
-                const _ParticipatedBadge(compact: true)
-              else
-                Icon(contest.type.icon, size: 17, color: contest.type.color),
+    final isEndedLive = contest.isLiveEnded;
+    return Opacity(
+      opacity: isEndedLive ? 0.58 : 1,
+      child: AppCard(
+        onTap: isEndedLive
+            ? null
+            : () {
+                clearContestDetailCache(contest.id);
+                context.push('/contests/${contest.id}');
+              },
+        padding: const EdgeInsets.all(12),
+        borderRadius: 18,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _ContestIcon(contest: contest, size: 40, muted: isEndedLive),
+                const Spacer(),
+                if (isEndedLive)
+                  const _EndedLiveBadge(compact: true)
+                else if (hasParticipated)
+                  const _ParticipatedBadge(compact: true)
+                else
+                  _SmallBadge(
+                    label: _contestBadgeLabel(contest),
+                    compact: true,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              contest.title,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.h3.copyWith(
+                color: isEndedLive
+                    ? AppColors.textSecondary
+                    : AppColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _formatPrize(contest.prizeValue),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.price.copyWith(
+                color: isEndedLive ? AppColors.textHint : AppColors.gold,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 4),
+            _InlineMeta(
+              icon: contest.isLive
+                  ? Icons.groups_rounded
+                  : Icons.visibility_rounded,
+              label: _contestAudienceLabel(contest),
+            ),
+            if (!isEndedLive) ...[
+              const SizedBox(height: 4),
+              _InlineMeta(
+                icon: Icons.event_available_rounded,
+                label: 'Fin ${_shortDateTime(contest.computedLiveEndsAt)}',
+              ),
+              const SizedBox(height: 3),
+              _InlineMeta(
+                icon: Icons.emoji_events_rounded,
+                label: '${_winnerText(contest)} après la fin',
+              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            contest.title,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.h3.copyWith(fontSize: 14),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _formatPrize(contest.prizeValue),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.price.copyWith(fontSize: 14),
-          ),
-          const SizedBox(height: 4),
-          _InlineMeta(
-            icon: Icons.visibility_rounded,
-            label: '${contest.viewsCount} vues',
-          ),
-          const Spacer(),
-          if (hasParticipated)
-            const _ParticipatedBadge()
-          else
-            _SmallBadge(label: contest.type.filterLabel),
-          const SizedBox(height: 8),
-          ContestTimer(
-            endsAt: contest.endsAt,
-            style: AppTextStyles.bodySmall.copyWith(fontSize: 10.5),
-          ),
-        ],
+            const Spacer(),
+            if (isEndedLive)
+              const _EndedLiveBadge()
+            else if (hasParticipated)
+              const _ParticipatedBadge()
+            else
+              _SmallBadge(label: _contestBadgeLabel(contest)),
+            const SizedBox(height: 8),
+            if (isEndedLive)
+              Text(
+                'Terminé',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textHint,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              )
+            else
+              ContestTimer(
+                endsAt: _contestCountdownTarget(contest),
+                style: AppTextStyles.bodySmall.copyWith(fontSize: 10.5),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -458,8 +622,13 @@ class _GridContestCard extends StatelessWidget {
 class _ContestIcon extends StatelessWidget {
   final Contest contest;
   final double size;
+  final bool muted;
 
-  const _ContestIcon({required this.contest, required this.size});
+  const _ContestIcon({
+    required this.contest,
+    required this.size,
+    this.muted = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -469,7 +638,9 @@ class _ContestIcon extends StatelessWidget {
       height: size,
       padding: EdgeInsets.all(logoUrl?.isNotEmpty == true ? 6 : 0),
       decoration: BoxDecoration(
-        color: logoUrl?.isNotEmpty == true
+        color: muted
+            ? AppColors.surfaceElevated
+            : logoUrl?.isNotEmpty == true
             ? Colors.white
             : contest.type.color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(15),
@@ -480,7 +651,7 @@ class _ContestIcon extends StatelessWidget {
           ? _NetworkLogo(url: logoUrl!)
           : Icon(
               contest.type.icon,
-              color: contest.type.color,
+              color: muted ? AppColors.textHint : contest.type.color,
               size: size * 0.5,
             ),
     );
@@ -512,13 +683,17 @@ class _NetworkLogo extends StatelessWidget {
 
 class _SmallBadge extends StatelessWidget {
   final String label;
+  final bool compact;
 
-  const _SmallBadge({required this.label});
+  const _SmallBadge({required this.label, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 7,
+        vertical: compact ? 3 : 4,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(999),
@@ -529,7 +704,7 @@ class _SmallBadge extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: AppTextStyles.bodySmall.copyWith(
-          fontSize: 10.5,
+          fontSize: compact ? 9.5 : 10.5,
           color: AppColors.primary,
           fontWeight: FontWeight.w700,
         ),
@@ -574,6 +749,48 @@ class _ParticipatedBadge extends StatelessWidget {
             style: AppTextStyles.bodySmall.copyWith(
               fontSize: compact ? 9.5 : 10.5,
               color: AppColors.accentGreen,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EndedLiveBadge extends StatelessWidget {
+  final bool compact;
+
+  const _EndedLiveBadge({this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 7,
+        vertical: compact ? 3 : 4,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.surfaceBorder, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.history_toggle_off_rounded,
+            color: AppColors.textHint,
+            size: compact ? 10 : 11,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Terminé',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              fontSize: compact ? 9.5 : 10.5,
+              color: AppColors.textHint,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -660,4 +877,17 @@ String _formatPrize(num value) {
   final rounded = value.round();
   if (rounded <= 0) return 'Prix surprise';
   return '$rounded FCFA';
+}
+
+String _shortDateTime(DateTime date) {
+  return 'le ${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')} à '
+      '${date.hour.toString().padLeft(2, '0')}:'
+      '${date.minute.toString().padLeft(2, '0')}';
+}
+
+String _winnerText(Contest contest) {
+  return contest.winnersCount > 1
+      ? '${contest.winnersCount} vainqueurs'
+      : '1 vainqueur';
 }

@@ -206,8 +206,8 @@ final playerPlansProvider = FutureProvider.autoDispose<PlayerPlansData>((
   ref,
 ) async {
   final supabase = ref.watch(supabaseProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) throw StateError('Utilisateur non connecté.');
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) throw StateError('Utilisateur non connecté.');
 
   authLogPayload('playerPlansFetch', {'request': 'select'});
   final plansRows = await supabase
@@ -256,13 +256,13 @@ final playerPlansProvider = FutureProvider.autoDispose<PlayerPlansData>((
     authLogError('paymentMethodsFetch', error, stackTrace);
   }
 
-  authLogPayload('playerSubscriptionFetch', {'userId': user.id});
+  authLogPayload('playerSubscriptionFetch', {'userId': userId});
   final subscriptionRows = await supabase
       .from('player_subscriptions')
       .select(
         'id, user_id, plan_id, amount, status, starts_at, expires_at, payment_method, payment_reference, player_plans(name)',
       )
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .inFilter('status', ['active', 'pending'])
       .order('created_at', ascending: false)
       .limit(1);

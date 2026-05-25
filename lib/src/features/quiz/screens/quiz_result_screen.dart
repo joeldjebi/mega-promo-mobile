@@ -37,6 +37,8 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   int get _correct => widget.answers.where((answer) => answer.isCorrect).length;
   int get _points =>
       widget.answers.fold(0, (sum, answer) => sum + answer.points);
+  int get _durationMs =>
+      widget.answers.fold(0, (sum, answer) => sum + answer.elapsedMs);
   double get _ratio =>
       widget.questions.isEmpty ? 0 : _correct / widget.questions.length;
 
@@ -49,12 +51,27 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
       correctIndex: question.correctIndex,
       isCorrect: false,
       points: 0,
+      elapsedMs: (question.timeLimit <= 0 ? 30 : question.timeLimit) * 1000,
     );
   }
 
   String _answerLabel(int? index) {
     if (index == null) return 'Non répondu';
     return String.fromCharCode(65 + index);
+  }
+
+  String _answerText(QuizQuestion question, int? index) {
+    if (index == null) return 'Non répondu';
+    if (index < 0 || index >= question.options.length) {
+      return _answerLabel(index);
+    }
+    final optionText = question.optionLabel(index).trim();
+    if (optionText.isEmpty) return _answerLabel(index);
+    return '${_answerLabel(index)} · $optionText';
+  }
+
+  String _formatMs(int milliseconds) {
+    return '${milliseconds.clamp(0, 999999999)} ms';
   }
 
   @override
@@ -83,6 +100,9 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
               'type': 'quiz',
               'status': 'completed',
               'completed_at': DateTime.now().toIso8601String(),
+              'duration_ms': _durationMs,
+              'correct_count': _correct,
+              'total_questions': widget.questions.length,
               'items': answersPayload,
             },
             'completed': true,
@@ -94,7 +114,15 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
         'user_id': user.id,
         'contest_id': widget.contestId,
         'score': _points,
-        'answers': answersPayload,
+        'answers': {
+          'type': 'quiz',
+          'status': 'completed',
+          'completed_at': DateTime.now().toIso8601String(),
+          'duration_ms': _durationMs,
+          'correct_count': _correct,
+          'total_questions': widget.questions.length,
+          'items': answersPayload,
+        },
         'completed': true,
       });
       await supabase
@@ -198,6 +226,11 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  _ResultStat(
+                    label: 'Temps de réponse global',
+                    value: _formatMs(_durationMs),
+                  ),
                 ],
               ),
             ),
@@ -228,16 +261,67 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(
-                              question.questionText,
-                              style: AppTextStyles.body.copyWith(
-                                fontWeight: FontWeight.w700,
-                                height: 1.35,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (question.questionText.trim().isNotEmpty)
+                                  Text(
+                                    question.questionText,
+                                    style: AppTextStyles.body.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                if (question.hasQuestionImage) ...[
+                                  if (question.questionText.trim().isNotEmpty)
+                                    const SizedBox(height: 8),
+                                  _ResultImage(
+                                    imageUrl: question.questionImageUrl!,
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
                       ),
+                      if (question.hasImageOptions) ...[
+                        const SizedBox(height: 10),
+                        GridView.builder(
+                          itemCount: question.optionImageUrls.length,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 4,
+                                crossAxisSpacing: 6,
+                                mainAxisSpacing: 6,
+                              ),
+                          itemBuilder: (context, optionIndex) {
+                            final isCorrect =
+                                optionIndex == answer.correctIndex;
+                            final isSelected =
+                                optionIndex == answer.selectedIndex;
+                            final color = isCorrect
+                                ? AppColors.accentGreen
+                                : isSelected
+                                ? AppColors.accentRed
+                                : AppColors.surfaceBorder;
+                            return DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: color, width: 1.5),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(11),
+                                child: Image.network(
+                                  question.optionImageUrls[optionIndex]!,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Wrap(
                         spacing: 8,
@@ -245,20 +329,25 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                         children: [
                           _AnswerPill(
                             label: 'Ta réponse',
-                            value: _answerLabel(answer.selectedIndex),
+                            value: _answerText(question, answer.selectedIndex),
                             color: answer.isCorrect
                                 ? AppColors.accentGreen
                                 : AppColors.accentRed,
                           ),
                           _AnswerPill(
                             label: 'Bonne réponse',
-                            value: _answerLabel(answer.correctIndex),
+                            value: _answerText(question, answer.correctIndex),
                             color: AppColors.primaryLight,
                           ),
                           _AnswerPill(
                             label: 'Points',
                             value: '+${answer.points}',
                             color: AppColors.gold,
+                          ),
+                          _AnswerPill(
+                            label: 'Temps',
+                            value: _formatMs(answer.elapsedMs),
+                            color: AppColors.primaryLight,
                           ),
                         ],
                       ),
@@ -286,6 +375,36 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ResultImage extends StatelessWidget {
+  final String imageUrl;
+
+  const _ResultImage({required this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Image.network(
+        imageUrl,
+        height: 120,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            height: 120,
+            color: AppColors.surfaceElevated,
+            alignment: Alignment.center,
+            child: const Icon(
+              Icons.broken_image_rounded,
+              color: AppColors.textHint,
+            ),
+          );
+        },
       ),
     );
   }
