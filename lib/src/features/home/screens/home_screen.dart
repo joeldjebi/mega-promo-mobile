@@ -194,24 +194,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(height: 10),
                         SizedBox(
                           height: 214,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            clipBehavior: Clip.none,
-                            itemCount: liveQuizzes.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(width: 10),
-                            itemBuilder: (context, index) {
-                              final contest = liveQuizzes[index];
-                              return SizedBox(
-                                width: 318,
-                                child: _LiveQuizCard(
-                                  contest: contest,
-                                  hasParticipated: participatedContestIds
-                                      .contains(contest.id),
-                                  isRegistered: registeredLiveQuizIds.contains(
-                                    contest.id,
-                                  ),
-                                ),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final itemWidth = liveQuizzes.length == 1
+                                  ? constraints.maxWidth
+                                  : 318.0;
+                              return ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                clipBehavior: Clip.none,
+                                itemCount: liveQuizzes.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(width: 10),
+                                itemBuilder: (context, index) {
+                                  final contest = liveQuizzes[index];
+                                  return SizedBox(
+                                    width: itemWidth,
+                                    child: _LiveQuizCard(
+                                      contest: contest,
+                                      hasParticipated: participatedContestIds
+                                          .contains(contest.id),
+                                      isRegistered: registeredLiveQuizIds
+                                          .contains(contest.id),
+                                    ),
+                                  );
+                                },
                               );
                             },
                           ),
@@ -232,17 +238,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(height: 10),
                         SizedBox(
                           height: 228,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            clipBehavior: Clip.none,
-                            itemCount: boosted.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(width: 10),
-                            itemBuilder: (context, index) {
-                              return _FeaturedContestCard(
-                                contest: boosted[index],
-                                hasParticipated: participatedContestIds
-                                    .contains(boosted[index].id),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final itemWidth = boosted.length == 1
+                                  ? constraints.maxWidth
+                                  : 274.0;
+                              return ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                clipBehavior: Clip.none,
+                                itemCount: boosted.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(width: 10),
+                                itemBuilder: (context, index) {
+                                  return _FeaturedContestCard(
+                                    width: itemWidth,
+                                    contest: boosted[index],
+                                    hasParticipated: participatedContestIds
+                                        .contains(boosted[index].id),
+                                  );
+                                },
                               );
                             },
                           ),
@@ -431,23 +445,39 @@ class _InfoMessageCarousel extends ConsumerStatefulWidget {
 }
 
 class _InfoMessageCarouselState extends ConsumerState<_InfoMessageCarousel> {
-  final PageController _controller = PageController(viewportFraction: 0.94);
+  PageController? _controller;
+  int _controllerMessagesCount = 0;
   int _index = 0;
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
+  }
+
+  PageController _pageController() {
+    final messageCount = widget.messages.length;
+    final viewportFraction = messageCount == 1 ? 1.0 : 0.94;
+    if (_controller != null && _controllerMessagesCount == messageCount) {
+      return _controller!;
+    }
+
+    _controller?.dispose();
+    _controllerMessagesCount = messageCount;
+    _controller = PageController(viewportFraction: viewportFraction);
+    return _controller!;
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _pageController();
     return Column(
       children: [
         SizedBox(
           height: 118,
           child: PageView.builder(
-            controller: _controller,
+            controller: controller,
+            padEnds: false,
             itemCount: widget.messages.length,
             onPageChanged: (index) => setState(() => _index = index),
             itemBuilder: (context, index) {
@@ -637,10 +667,12 @@ Color _parseColor(String value, Color fallback) {
 }
 
 class _FeaturedContestCard extends StatelessWidget {
+  final double width;
   final Contest contest;
   final bool hasParticipated;
 
   const _FeaturedContestCard({
+    this.width = 274,
     required this.contest,
     required this.hasParticipated,
   });
@@ -651,7 +683,7 @@ class _FeaturedContestCard extends StatelessWidget {
       onTap: () => context.push('/contests/${contest.id}'),
       borderRadius: BorderRadius.circular(20),
       child: Container(
-        width: 274,
+        width: width,
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -1721,6 +1753,13 @@ String _winnerText(Contest contest) {
       : '1 vainqueur';
 }
 
+String _homeGreeting() {
+  final hour = DateTime.now().hour;
+  if (hour < 12) return 'Bonjour';
+  if (hour < 18) return 'Bon après-midi';
+  return 'Bonsoir';
+}
+
 class _HomeHeader extends StatelessWidget {
   final UserProfile user;
 
@@ -1736,7 +1775,7 @@ class _HomeHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Bonjour',
+                _homeGreeting(),
                 style: AppTextStyles.bodySecondary.copyWith(fontSize: 12.5),
               ),
               const SizedBox(height: 1),

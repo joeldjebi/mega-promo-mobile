@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -340,8 +339,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       _planAccessDenied ||
       (data.contest.isLive && !data.contest.isLiveReady) ||
       data.contest.isLiveEnded ||
-      _isLiveRegisteredAndWaiting ||
-      (!data.contest.isLive && _dailyLimitReached);
+      _isLiveRegisteredAndWaiting;
 
   String get _buttonText {
     if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
@@ -355,7 +353,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
     if (data.hasParticipated) return 'Déjà participé · Actualiser';
     if (_dailyLimitReached) {
-      return 'Limite ${data.userProfile.dailyParticipationLimit}/jour atteinte';
+      return 'Débloquer mon profil';
     }
     return 'Participer';
   }
@@ -447,8 +445,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                 prizeLabel: _formatPrize(data.contest.prizeValue),
                 registeredCount: data.contest.registeredCount + 1,
                 connectedCount: data.contest.connectedCount,
-                showClassicNotification:
-                    defaultTargetPlatform != TargetPlatform.iOS,
+                showClassicNotification: false,
               ),
             );
           }
@@ -763,6 +760,42 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                       ),
                     ),
                   ],
+                  if (!contest.isLive &&
+                      _dailyLimitReached &&
+                      !data.hasParticipated) ...[
+                    const SizedBox(height: 14),
+                    AppCard(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.workspace_premium_rounded,
+                            color: AppColors.gold,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Limite journalière atteinte',
+                                  style: AppTextStyles.h3.copyWith(
+                                    color: AppColors.gold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Tu as utilisé ${data.userProfile.participationsToday}/${data.userProfile.dailyParticipationLimit} participations aujourd’hui. Débloque ton profil pour continuer à jouer.',
+                                  style: AppTextStyles.bodySecondary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (data.hasParticipated) ...[
                     const SizedBox(height: 14),
                     AppCard(
@@ -845,6 +878,8 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
+                  : (!contest.isLive && _dailyLimitReached)
+                  ? () => context.push('/subscriptions')
                   : () => _participate(context),
             ),
           ),

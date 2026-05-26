@@ -206,20 +206,26 @@ final playerPaymentProfileProvider = FutureProvider<PlayerPaymentProfile>((
         .select('id, document_type, status, rejection_reason, created_at')
         .eq('user_id', userId)
         .order('created_at', ascending: false)
-        .limit(1),
+        .limit(10),
   ]);
 
   final methods = (responses[0] as List)
       .whereType<Map>()
       .map((row) => PlayerPaymentMethod.fromJson(row.cast()))
       .toList();
-  final kycRows = responses[1] as List;
+  final kycRows = (responses[1] as List).whereType<Map>().toList();
+  final approvedKyc = kycRows.cast<Map>().where(
+    (row) => row['status'] == 'approved',
+  );
+  final visibleKyc = approvedKyc.isNotEmpty
+      ? approvedKyc.first
+      : kycRows.cast<Map>().firstOrNull;
 
   return PlayerPaymentProfile(
     methods: methods,
-    latestKyc: kycRows.isEmpty
+    latestKyc: visibleKyc == null
         ? null
-        : PlayerKycRequest.fromJson((kycRows.first as Map).cast()),
+        : PlayerKycRequest.fromJson(visibleKyc.cast()),
   );
 });
 

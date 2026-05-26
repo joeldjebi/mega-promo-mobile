@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -499,9 +498,7 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     if (_lastLiveActivitySignature == signature) return;
     _lastLiveActivitySignature = signature;
 
-    final showClassicNotification =
-        !_classicWaitingNotificationShown &&
-        defaultTargetPlatform != TargetPlatform.iOS;
+    const showClassicNotification = false;
     _classicWaitingNotificationShown = true;
 
     unawaited(

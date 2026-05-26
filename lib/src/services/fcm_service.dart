@@ -4,12 +4,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_text_styles.dart';
 import '../../firebase_options.dart';
+import '../features/profile/providers/player_payment_methods_provider.dart';
 import 'app_telemetry_service.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -174,12 +174,12 @@ class FcmService {
 
   static Future<void> _configureForegroundPresentation() async {
     await _messaging.setForegroundNotificationPresentationOptions(
-      alert: true,
+      alert: false,
       badge: true,
-      sound: true,
+      sound: false,
     );
     debugPrint(
-      '[FCM][foreground] presentation alert=true badge=true sound=true',
+      '[FCM][foreground] presentation alert=false badge=true sound=false',
     );
   }
 
@@ -249,7 +249,9 @@ class FcmService {
           'MegaPromo';
       final body = notification?.body ?? message.data['body'] as String? ?? '';
 
-      _showPlainNotification(title: title, body: body);
+      debugPrint(
+        '[FCM][message] foreground display skipped title=$title bodyLength=${body.length}',
+      );
     });
   }
 
@@ -278,14 +280,14 @@ class FcmService {
             final notification = payload.newRecord;
             final title =
                 notification['title'] as String? ?? 'Nouveau concours';
-            final body = notification['body'] as String? ?? '';
             final type = notification['type'] as String? ?? 'info';
             debugPrint(
               '[FCM][in-app] notification received id=${notification['id']} '
               'type=$type title=$title',
             );
-
-            _showPlainNotification(title: title, body: body);
+            if (type == 'kyc') {
+              _invalidateKycState();
+            }
           },
         )
         .subscribe();
@@ -302,46 +304,6 @@ class FcmService {
     } catch (_) {
       // The channel may already be closed after a session reset.
     }
-  }
-
-  static void _showPlainNotification({
-    required String title,
-    required String body,
-  }) {
-    scaffoldMessengerKey.currentState
-      ?..hideCurrentMaterialBanner()
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: AppColors.surface,
-          elevation: 8,
-          content: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(
-                Icons.notifications_active_rounded,
-                color: AppColors.primaryLight,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title, style: AppTextStyles.h3),
-                    if (body.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(body, style: AppTextStyles.bodySecondary),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
   }
 
   static void _listenNotificationTaps() {
@@ -366,7 +328,24 @@ class FcmService {
   }
 
   static void _openMessageTarget(RemoteMessage message) {
-    _openDataTarget(type: message.data['type'] as String?, data: message.data);
+    final type = message.data['type'] as String?;
+    if (type == 'kyc') {
+      _invalidateKycState();
+    }
+    _openDataTarget(type: type, data: message.data);
+  }
+
+  static void _invalidateKycState() {
+    final context = rootNavigatorKey.currentContext;
+    if (context == null) return;
+    try {
+      ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).invalidate(playerPaymentProfileProvider);
+    } catch (_) {
+      // The app may still be bootstrapping when the notification arrives.
+    }
   }
 
   static void _openDataTarget({

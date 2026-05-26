@@ -312,6 +312,9 @@ class _CompactProfileHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final avatar = avatarForId(data.user.avatarUrl);
     final avatarSize = isCompact ? 74.0 : 86.0;
+    final statusLabel = data.user.isPremium ? 'Premium' : 'Standard';
+    final showStatusPill =
+        data.user.planName.trim().toLowerCase() != statusLabel.toLowerCase();
 
     return Column(
       children: [
@@ -390,11 +393,13 @@ class _CompactProfileHeader extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _CompactPill(text: data.user.planName),
-            const SizedBox(width: 8),
-            _CompactPill(
-              text: data.user.isPremium ? 'Premium' : 'Standard',
-              highlighted: data.user.isPremium,
-            ),
+            if (showStatusPill) ...[
+              const SizedBox(width: 8),
+              _CompactPill(
+                text: statusLabel,
+                highlighted: data.user.isPremium,
+              ),
+            ],
           ],
         ),
       ],
@@ -852,20 +857,22 @@ class _PaymentMethodsSheet extends ConsumerWidget {
                     ),
                   ),
                 ),
-              const SizedBox(height: 6),
-              AppButton(
-                text: data.methods.isEmpty
-                    ? 'Ajouter mon numéro Mobile Money'
-                    : 'Ajouter un deuxième numéro',
-                icon: Icons.add_card_rounded,
-                onPressed: () {
-                  if (data.methods.isNotEmpty && !data.hasApprovedKyc) {
-                    _showKycRequiredSheet(context, ref, data);
-                    return;
-                  }
-                  _showSavePaymentMethodSheet(context);
-                },
-              ),
+              if (data.methods.length < 2) ...[
+                const SizedBox(height: 6),
+                AppButton(
+                  text: data.methods.isEmpty
+                      ? 'Ajouter mon numéro Mobile Money'
+                      : 'Ajouter un deuxième numéro',
+                  icon: Icons.add_card_rounded,
+                  onPressed: () {
+                    if (data.methods.isNotEmpty && !data.hasApprovedKyc) {
+                      _showKycRequiredSheet(context, ref, data);
+                      return;
+                    }
+                    _showSavePaymentMethodSheet(context);
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -1016,7 +1023,13 @@ void _showKycRequiredSheet(
   showModalBottomSheet<void>(
     context: context,
     backgroundColor: Colors.transparent,
-    builder: (_) => _KycRequiredSheet(profile: profile),
+    isScrollControlled: true,
+    builder: (_) => Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: _KycRequiredSheet(profile: profile),
+    ),
   );
 }
 
@@ -1056,16 +1069,21 @@ class _KycRequiredSheetState extends ConsumerState<_KycRequiredSheet> {
         ? 'Ton document est déjà envoyé. MegaPromo doit le valider avant que tu puisses ajouter un 2e numéro ou modifier un Mobile Money existant.'
         : 'Pour ajouter un 2e numéro ou modifier un Mobile Money existant, MegaPromo doit confirmer que le compte t’appartient. Cela protège tes gains contre les changements frauduleux.';
 
+    final maxSheetHeight = MediaQuery.sizeOf(context).height * 0.86;
+
     return Container(
+      constraints: BoxConstraints(maxHeight: maxSheetHeight),
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Text(title, style: AppTextStyles.h2),
           const SizedBox(height: 8),
           Text(description, style: AppTextStyles.bodySecondary),
@@ -1185,7 +1203,8 @@ class _KycRequiredSheetState extends ConsumerState<_KycRequiredSheet> {
               onPressed: () => Navigator.of(context).pop(),
             ),
           ],
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1746,6 +1765,9 @@ class _ProfileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final avatar = avatarForId(data.user.avatarUrl);
+    final statusLabel = data.user.isPremium ? 'Premium' : 'Standard';
+    final showStatusPill =
+        data.user.planName.trim().toLowerCase() != statusLabel.toLowerCase();
 
     return Column(
       children: [
@@ -1817,9 +1839,7 @@ class _ProfileHeader extends StatelessWidget {
           runSpacing: 8,
           children: [
             _ProfileHeaderPill(text: data.user.planName),
-            _ProfileHeaderPill(
-              text: data.user.isPremium ? 'Premium' : 'Standard',
-            ),
+            if (showStatusPill) _ProfileHeaderPill(text: statusLabel),
           ],
         ),
       ],

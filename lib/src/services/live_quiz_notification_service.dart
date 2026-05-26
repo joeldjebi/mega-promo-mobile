@@ -24,11 +24,27 @@ class LiveQuizNotificationService {
 
     try {
       await _notifications.initialize(settings);
-      await _notifications
+      final androidPlugin = _notifications
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
-          >()
-          ?.requestNotificationsPermission();
+          >();
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'mega_promo_push',
+          'MegaPromo Push',
+          description: 'Notifications push distantes MegaPromo',
+          importance: Importance.high,
+        ),
+      );
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'live_quiz_waiting',
+          'Quiz Live',
+          description: 'Salle d’attente et rappels Quiz Live MegaPromo',
+          importance: Importance.max,
+        ),
+      );
+      await androidPlugin?.requestNotificationsPermission();
       _initialized = true;
     } catch (error, stackTrace) {
       debugPrint('[LiveQuizNotification] init failed: $error');

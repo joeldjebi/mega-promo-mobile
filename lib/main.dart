@@ -108,16 +108,16 @@ class KonkourApp extends ConsumerWidget {
   }
 }
 
-class FcmLifecycleSync extends StatefulWidget {
+class FcmLifecycleSync extends ConsumerStatefulWidget {
   final Widget child;
 
   const FcmLifecycleSync({super.key, required this.child});
 
   @override
-  State<FcmLifecycleSync> createState() => _FcmLifecycleSyncState();
+  ConsumerState<FcmLifecycleSync> createState() => _FcmLifecycleSyncState();
 }
 
-class _FcmLifecycleSyncState extends State<FcmLifecycleSync>
+class _FcmLifecycleSyncState extends ConsumerState<FcmLifecycleSync>
     with WidgetsBindingObserver {
   @override
   void initState() {
@@ -135,6 +135,7 @@ class _FcmLifecycleSyncState extends State<FcmLifecycleSync>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(FcmService.syncTokenForCurrentUser(force: true));
+      ref.invalidate(playerPaymentProfileProvider);
     }
   }
 
