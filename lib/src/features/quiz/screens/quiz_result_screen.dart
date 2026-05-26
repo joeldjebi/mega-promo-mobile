@@ -70,8 +70,22 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
     return '${_answerLabel(index)} · $optionText';
   }
 
-  String _formatMs(int milliseconds) {
-    return '${milliseconds.clamp(0, 999999999)} ms';
+  String _formatDuration(int milliseconds) {
+    final safeMilliseconds = milliseconds.clamp(0, 999999999);
+    final minutes = safeMilliseconds ~/ Duration.millisecondsPerMinute;
+    final seconds =
+        (safeMilliseconds % Duration.millisecondsPerMinute) ~/
+        Duration.millisecondsPerSecond;
+    final remainingMilliseconds =
+        safeMilliseconds % Duration.millisecondsPerSecond;
+    final millisecondsLabel = remainingMilliseconds.toString().padLeft(3, '0');
+
+    if (minutes > 0) {
+      final secondsLabel = seconds.toString().padLeft(2, '0');
+      return '$minutes min $secondsLabel s $millisecondsLabel ms';
+    }
+
+    return '$seconds s $millisecondsLabel ms';
   }
 
   @override
@@ -229,7 +243,7 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                   const SizedBox(height: 10),
                   _ResultStat(
                     label: 'Temps de réponse global',
-                    value: _formatMs(_durationMs),
+                    value: _formatDuration(_durationMs),
                   ),
                 ],
               ),
@@ -346,7 +360,7 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                           ),
                           _AnswerPill(
                             label: 'Temps',
-                            value: _formatMs(answer.elapsedMs),
+                            value: _formatDuration(answer.elapsedMs),
                             color: AppColors.primaryLight,
                           ),
                         ],

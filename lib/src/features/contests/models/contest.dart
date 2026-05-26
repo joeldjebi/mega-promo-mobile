@@ -250,7 +250,7 @@ class Contest {
   }
 
   bool get isLiveReady =>
-      !isLive || (liveQuestionsCount >= 5 && liveDurationSeconds > 0);
+      !isLive || (liveQuestionsCount > 0 && liveDurationSeconds > 0);
 
   DateTime get computedLiveEndsAt {
     if (!isLive) return endsAt;

@@ -27,61 +27,17 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
     throw StateError('Ce Quiz Live n’est pas ouvert actuellement.');
   }
 
-  final existing = await supabase
-      .from('participations')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('contest_id', data.contest.id)
-      .limit(1)
-      .maybeSingle();
-
-  if (existing != null) {
-    return LiveQuizStartResult(participationId: existing['id'] as String);
+  final response = await supabase.rpc(
+    'start_live_quiz_participation',
+    params: {'p_contest_id': data.contest.id},
+  );
+  final payload = response is Map<String, dynamic>
+      ? response
+      : Map<String, dynamic>.from(response as Map);
+  final participationId = payload['participation_id'] as String?;
+  if (participationId == null || participationId.isEmpty) {
+    throw StateError('Impossible de demarrer ce Quiz Live.');
   }
 
-  if (data.contest.isLive) {
-    final waitingSession = await supabase
-        .from('live_sessions')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('contest_id', data.contest.id)
-        .limit(1)
-        .maybeSingle();
-
-    if (waitingSession == null) {
-      throw StateError(
-        'Tu devais entrer en salle d’attente avant le lancement.',
-      );
-    }
-  }
-
-  final participation = await supabase
-      .from('participations')
-      .insert({
-        'user_id': user.id,
-        'contest_id': data.contest.id,
-        'score': 0,
-        'answers': {
-          'type': 'quiz_live',
-          'status': 'started',
-          'started_at': DateTime.now().toIso8601String(),
-          'live_starts_at': data.contest.liveStartsAt?.toIso8601String(),
-        },
-        'completed': false,
-        'is_live_session': true,
-      })
-      .select('id')
-      .single();
-
-  await supabase
-      .from('users')
-      .update({
-        'participations_today': data.userProfile.participationsToday + 1,
-        'last_participation_date': DateTime.now().toIso8601String().split(
-          'T',
-        )[0],
-      })
-      .eq('id', user.id);
-
-  return LiveQuizStartResult(participationId: participation['id'] as String);
+  return LiveQuizStartResult(participationId: participationId);
 }
