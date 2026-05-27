@@ -6,6 +6,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../../services/app_telemetry_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../models/contest.dart';
 
@@ -41,17 +42,35 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   });
   await _processLiveQuizEvents(supabase);
 
+  var lastGoodContests = const <Contest>[];
   final bootstrapContests = bootstrap?.contests;
   if (bootstrapContests != null) {
-    yield _sortContests(
+    lastGoodContests = _sortContests(
       bootstrapContests
           .where((contest) => contest.isAccessibleForPlan(userPlanKey))
           .where((contest) => !contest.isLive || contest.isLiveReady)
           .toList(),
     );
+    yield lastGoodContests;
   }
 
-  yield await _loadContestsSnapshot(supabase, userPlanKey);
+  try {
+    lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
+    yield lastGoodContests;
+  } catch (error, stackTrace) {
+    authLogError('contestsInitialSnapshot', error, stackTrace);
+    if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
+    unawaited(
+      AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'contests_initial_snapshot_network',
+      ),
+    );
+    if (bootstrapContests == null) {
+      yield lastGoodContests;
+    }
+  }
 
   final stream = supabase
       .from('contests')
@@ -60,7 +79,24 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
       .asyncMap((rows) async {
         authLogResponse('contestsStream', {'count': rows.length});
         await _processLiveQuizEvents(supabase);
-        return _loadContestsSnapshot(supabase, userPlanKey);
+        try {
+          lastGoodContests = await _loadContestsSnapshot(
+            supabase,
+            userPlanKey,
+          );
+          return lastGoodContests;
+        } catch (error, stackTrace) {
+          authLogError('contestsStreamSnapshot', error, stackTrace);
+          if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
+          unawaited(
+            AppTelemetryService.recordError(
+              error,
+              stackTrace,
+              reason: 'contests_stream_snapshot_network',
+            ),
+          );
+          return lastGoodContests;
+        }
       });
 
   yield* stream.handleError((Object error, StackTrace stackTrace) {
@@ -270,7 +306,7 @@ class ContestPrediction {
           'score_exact',
       homeTeam: json['home_team'] as String? ?? 'Equipe 1',
       awayTeam: json['away_team'] as String? ?? 'Equipe 2',
-      matchLabel: json['match_label'] as String? ?? 'Pronostic du match',
+      matchLabel: json['match_label'] as String? ?? 'Quiz sport',
       matchDate: DateTime.tryParse(json['match_date'] as String? ?? ''),
       homeScore: (json['home_score'] as num?)?.toInt(),
       awayScore: (json['away_score'] as num?)?.toInt(),
@@ -348,17 +384,17 @@ enum FootballPredictionKind {
       firstScorer => 'Qui marquera le premier but ?',
       assistProvider => 'Qui fera la premiere passe decisive ?',
       startingEleven => 'Selectionne les 11 joueurs titulaires.',
-      customText => 'Entre ton pronostic.',
+      customText => 'Entre ta réponse.',
     };
   }
 
   String get defaultActionLabel {
     return switch (this) {
       scoreExact => 'Valider mon score',
-      firstScorer => 'Valider mon buteur',
-      assistProvider => 'Valider mon passeur',
+      firstScorer => 'Valider ma réponse',
+      assistProvider => 'Valider ma réponse',
       startingEleven => 'Valider mon XI',
-      customText => 'Valider mon pronostic',
+      customText => 'Valider ma réponse',
     };
   }
 
@@ -423,7 +459,7 @@ class ContestDrawSettings {
       premiumTickets: (json['premium_tickets'] as num?)?.toInt() ?? 2,
       confirmationMessage:
           json['confirmation_message'] as String? ??
-          'Tu participes ! Les gagnants seront annoncés bientôt.',
+          'Participation validée ! Les lauréats seront annoncés bientôt.',
       winnerAnnouncementAt: DateTime.tryParse(
         json['winner_announcement_at'] as String? ?? '',
       ),
@@ -463,7 +499,7 @@ Future<Contest> _fetchContestDetailContest(
     contestId: contestId,
   );
   if (contestRows.isEmpty) {
-    throw StateError('Concours introuvable.');
+    throw StateError('Quiz introuvable.');
   }
   final contestRow = contestRows.first;
   authLogResponse('contestDetailFetch', contestRow);

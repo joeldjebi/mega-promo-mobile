@@ -21,17 +21,17 @@ enum ContestType {
   String get label {
     return switch (this) {
       ContestType.quiz => 'QUIZ',
-      ContestType.tirage => 'TIRAGE',
-      ContestType.pronostic => 'PRONOSTIC',
-      ContestType.other => 'CONCOURS',
+      ContestType.tirage => 'PROMO',
+      ContestType.pronostic => 'QUIZ SPORT',
+      ContestType.other => 'QUIZ',
     };
   }
 
   String get filterLabel {
     return switch (this) {
       ContestType.quiz => 'Quiz',
-      ContestType.tirage => 'Tirage',
-      ContestType.pronostic => 'Pronostic',
+      ContestType.tirage => 'Promotion',
+      ContestType.pronostic => 'Quiz sport',
       ContestType.other => 'Autre',
     };
   }
@@ -123,7 +123,7 @@ class Contest {
   factory Contest.fromJson(Map<String, dynamic> json) {
     return Contest(
       id: json['id'] as String,
-      title: json['title'] as String? ?? 'Concours',
+      title: json['title'] as String? ?? 'Quiz MegaPromo',
       description: json['description'] as String? ?? '',
       imageUrl: json['image_url'] as String?,
       brandLogoUrl: json['brand_logo_url'] as String?,

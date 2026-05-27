@@ -147,7 +147,7 @@ class _Header extends StatelessWidget {
               const SizedBox(height: 5),
               Text(
                 hasContest
-                    ? 'Les meilleurs joueurs de ce concours'
+                    ? 'Les meilleurs joueurs de ce quiz'
                     : hasLiveQuizScope
                     ? 'Les meilleurs joueurs Quiz Live'
                     : 'Les meilleurs joueurs MegaPromo',
@@ -275,7 +275,7 @@ class _ContestScopeBanner extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Classement de ce concours',
+              'Classement de ce quiz',
               style: AppTextStyles.bodySmall.copyWith(
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w800,
@@ -574,7 +574,7 @@ class _EmptyLeaderboardState extends StatelessWidget {
           Text('Aucun score pour l’instant', style: AppTextStyles.h2),
           const SizedBox(height: 6),
           Text(
-            'Joue à un concours pour marquer tes premiers points.',
+            'Joue à un quiz pour marquer tes premiers points.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary,
           ),

@@ -73,7 +73,7 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Concours'),
+        title: const Text('Quiz promotionnels'),
         actions: [
           _ViewToggleButton(
             icon: Icons.view_agenda_rounded,
@@ -124,12 +124,12 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                 children: [
                   Text(
-                    'Tous les concours actifs',
+                    'Tous les quiz promotionnels actifs',
                     style: AppTextStyles.h2.copyWith(fontSize: 18),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${filtered.length} concours disponible${filtered.length > 1 ? 's' : ''}',
+                    '${filtered.length} quiz disponible${filtered.length > 1 ? 's' : ''}',
                     style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
                   ),
                   if (categories.isNotEmpty) ...[
@@ -837,7 +837,7 @@ class _EmptyContestList extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 60),
       child: Text(
-        'Aucun concours ne correspond à ces filtres.',
+        'Aucun quiz ne correspond à ces filtres.',
         textAlign: TextAlign.center,
         style: AppTextStyles.bodySecondary,
       ),
@@ -860,7 +860,7 @@ class _ContestLoadError extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Impossible de charger les concours.',
+                'Impossible de charger les quiz promotionnels.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySecondary,
               ),
@@ -887,6 +887,6 @@ String _shortDateTime(DateTime date) {
 
 String _winnerText(Contest contest) {
   return contest.winnersCount > 1
-      ? '${contest.winnersCount} vainqueurs'
-      : '1 vainqueur';
+      ? '${contest.winnersCount} lauréats'
+      : '1 lauréat';
 }

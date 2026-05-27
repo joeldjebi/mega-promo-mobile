@@ -38,7 +38,7 @@ Future<void> shareContest({
 
   final text =
       '''*${contest.title}*
-Gagne *${formatCurrencyAmount(contest.prizeValue)}* sur MegaPromo !
+Découvre une récompense de marque sur MegaPromo : *${formatCurrencyAmount(contest.prizeValue)}*
 
 Il reste ${formatRemainingText(contest.endsAt)}
 $participantsCount joueurs participent déjà

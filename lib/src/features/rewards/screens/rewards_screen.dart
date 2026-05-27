@@ -90,7 +90,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                 children: [
                   Center(
                     child: Text(
-                      'GAINS',
+                      'RÉCOMPENSES',
                       style: AppTextStyles.label.copyWith(
                         color: AppColors.textHint,
                         fontSize: 15,
@@ -110,8 +110,8 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                   const SizedBox(height: 18),
                   Text(
                     _selectedTab == _RewardsTab.liveQuiz
-                        ? 'GAINS QUIZ LIVE'
-                        : 'GAINS CONCOURS',
+                        ? 'RÉCOMPENSES QUIZ LIVE'
+                        : 'RÉCOMPENSES QUIZ',
                     style: AppTextStyles.label,
                   ),
                   const SizedBox(height: 10),
@@ -144,7 +144,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Impossible de charger tes gains.',
+                        'Impossible de charger tes récompenses.',
                         textAlign: TextAlign.center,
                         style: AppTextStyles.bodySecondary,
                       ),
@@ -246,7 +246,7 @@ class _RewardsTabBar extends StatelessWidget {
         children: [
           Expanded(
             child: _RewardsTabButton(
-              label: 'Concours',
+              label: 'Quiz',
               count: contestCount,
               isSelected: selectedTab == _RewardsTab.contests,
               onTap: () => onChanged(_RewardsTab.contests),
@@ -395,11 +395,14 @@ class _RewardsSummary extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _SummaryStat(label: 'Gains', value: '${items.length}'),
+                child: _SummaryStat(
+                  label: 'Récompenses',
+                  value: '${items.length}',
+                ),
               ),
               Container(width: 1, height: 34, color: AppColors.separator),
               Expanded(
-                child: _SummaryStat(label: 'Payés', value: '$paid'),
+                child: _SummaryStat(label: 'Remises', value: '$paid'),
               ),
               Container(width: 1, height: 34, color: AppColors.separator),
               Expanded(
@@ -610,15 +613,15 @@ class _EmptyRewardsState extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             isLiveQuiz
-                ? 'Aucun gain Quiz Live pour le moment'
-                : 'Aucun gain concours pour le moment',
+                ? 'Aucune récompense Quiz Live pour le moment'
+                : 'Aucune récompense quiz pour le moment',
             style: AppTextStyles.h2.copyWith(fontSize: 17),
           ),
           const SizedBox(height: 6),
           Text(
             isLiveQuiz
-                ? 'Participe aux Quiz Live pour débloquer tes prochains lots.'
-                : 'Participe aux concours actifs pour débloquer tes prochains lots.',
+                ? 'Participe aux Quiz Live pour découvrir tes prochaines récompenses.'
+                : 'Participe aux quiz actifs pour découvrir tes prochaines récompenses.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
           ),
@@ -761,14 +764,14 @@ String _rewardTypeLabel(RewardPrize reward) {
     case 'voucher':
       return 'Bon';
     case 'concert_ticket':
-      return 'Ticket concert';
+      return 'Invitation concert';
     case 'physical_item':
       return 'Lot physique';
     case 'manual':
       return 'Lot manuel';
     case 'mobile_money':
     default:
-      return 'Mobile Money';
+      return 'Récompense partenaire';
   }
 }
 

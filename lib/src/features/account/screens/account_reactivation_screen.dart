@@ -150,7 +150,7 @@ class _AccountReactivationScreenState extends State<AccountReactivationScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Si tu annules la fermeture maintenant, tu récupères tes points, badges, participations et gains.',
+                      'Si tu annules la fermeture maintenant, tu récupères tes points, badges, participations et récompenses.',
                       textAlign: TextAlign.center,
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,

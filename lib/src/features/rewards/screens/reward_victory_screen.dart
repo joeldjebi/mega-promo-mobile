@@ -132,7 +132,7 @@ class _VictoryContent extends StatelessWidget {
         _RewardDetailsCard(reward: detail.reward),
         const SizedBox(height: 18),
         AppButton(
-          text: 'Retour aux gains',
+          text: 'Retour aux récompenses',
           icon: Icons.card_giftcard_rounded,
           onPressed: onBack,
           color: AppColors.gold,
@@ -250,7 +250,7 @@ class _VictoryHero extends StatelessWidget {
                           child: Text(
                             detail.contest.isLiveQuiz
                                 ? 'QUIZ LIVE'
-                                : 'CONCOURS',
+                                : 'QUIZ',
                             style: AppTextStyles.label.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
@@ -831,14 +831,14 @@ String _rewardTypeLabel(RewardPrize reward) {
     case 'voucher':
       return 'Bon';
     case 'concert_ticket':
-      return 'Ticket concert';
+      return 'Invitation concert';
     case 'physical_item':
       return 'Lot physique';
     case 'manual':
       return 'Lot manuel';
     case 'mobile_money':
     default:
-      return 'Mobile Money';
+      return 'Récompense partenaire';
   }
 }
 

@@ -71,7 +71,11 @@ class AppTelemetryService {
     _context.addAll(sanitized);
     if (!_isEnabled) return;
     for (final entry in sanitized.entries) {
-      await FirebaseCrashlytics.instance.setCustomKey(entry.key, entry.value);
+      try {
+        await FirebaseCrashlytics.instance.setCustomKey(entry.key, entry.value);
+      } catch (telemetryError) {
+        debugPrint('[TELEMETRY][context_failed] $telemetryError');
+      }
     }
   }
 
@@ -88,11 +92,25 @@ class AppTelemetryService {
   }
 
   static Future<void> recordFlutterFatal(FlutterErrorDetails details) async {
+    if (isRetryableNetworkError(details.exception)) {
+      await recordError(
+        details.exception,
+        details.stack,
+        reason: 'flutter_retryable_network',
+        context: const <String, Object?>{'fatal_downgraded': true},
+      );
+      return;
+    }
+
     if (!_isEnabled) {
       debugPrint('[TELEMETRY][flutter_fatal] ${details.exceptionAsString()}');
       return;
     }
-    await FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    try {
+      await FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    } catch (telemetryError) {
+      debugPrint('[TELEMETRY][flutter_fatal_failed] $telemetryError');
+    }
   }
 
   static Future<void> recordFatal(
@@ -101,16 +119,35 @@ class AppTelemetryService {
     String? reason,
     Map<String, Object?> context = const <String, Object?>{},
   }) async {
+    if (isRetryableNetworkError(error)) {
+      await recordError(
+        error,
+        stackTrace,
+        reason: reason == null
+            ? 'retryable_network'
+            : '${reason}_retryable_network',
+        context: <String, Object?>{
+          ...context,
+          'fatal_downgraded': true,
+        },
+      );
+      return;
+    }
+
     await setContext(context);
     debugPrint('[TELEMETRY][fatal] ${reason ?? 'fatal'} $error');
     if (!_isEnabled) return;
-    await FirebaseCrashlytics.instance.recordError(
-      error,
-      stackTrace,
-      reason: reason,
-      fatal: true,
-      information: _information(context),
-    );
+    try {
+      await FirebaseCrashlytics.instance.recordError(
+        error,
+        stackTrace,
+        reason: reason,
+        fatal: true,
+        information: _information(context),
+      );
+    } catch (telemetryError) {
+      debugPrint('[TELEMETRY][fatal_failed] $telemetryError');
+    }
   }
 
   static Future<void> recordError(
@@ -122,13 +159,17 @@ class AppTelemetryService {
     await setContext(context);
     debugPrint('[TELEMETRY][error] ${reason ?? 'non_fatal'} $error');
     if (!_isEnabled) return;
-    await FirebaseCrashlytics.instance.recordError(
-      error,
-      stackTrace,
-      reason: reason,
-      fatal: false,
-      information: _information(context),
-    );
+    try {
+      await FirebaseCrashlytics.instance.recordError(
+        error,
+        stackTrace,
+        reason: reason,
+        fatal: false,
+        information: _information(context),
+      );
+    } catch (telemetryError) {
+      debugPrint('[TELEMETRY][error_failed] $telemetryError');
+    }
   }
 
   static String userMessageForError(
@@ -138,10 +179,19 @@ class AppTelemetryService {
     final rawMessage = '$error'.toLowerCase();
 
     if (error is SocketException ||
+        error is HttpException ||
         error is TimeoutException ||
         rawMessage.contains('socket') ||
+        rawMessage.contains('httpexception') ||
         rawMessage.contains('timeout') ||
         rawMessage.contains('network') ||
+        rawMessage.contains('connection refused') ||
+        rawMessage.contains('connection reset') ||
+        rawMessage.contains('connection closed') ||
+        rawMessage.contains('connection abort') ||
+        rawMessage.contains('connection aborted') ||
+        rawMessage.contains('software caused connection abort') ||
+        rawMessage.contains('receiving data') ||
         rawMessage.contains('failed host lookup')) {
       return 'Connexion instable. Vérifie ton internet et réessaie.';
     }
@@ -190,6 +240,35 @@ class AppTelemetryService {
     }
 
     return fallback;
+  }
+
+  static bool isRetryableNetworkError(Object error) {
+    final rawMessage = '$error'.toLowerCase();
+    final typeName = error.runtimeType.toString().toLowerCase();
+
+    return error is SocketException ||
+        error is HttpException ||
+        error is TimeoutException ||
+        typeName.contains('authretryablefetch') ||
+        typeName.contains('clientexception') ||
+        typeName.contains('httpexception') ||
+        rawMessage.contains('authretryablefetchexception') ||
+        rawMessage.contains('clientexception with socketexception') ||
+        rawMessage.contains('httpexception') ||
+        rawMessage.contains('socketexception') ||
+        rawMessage.contains('connection refused') ||
+        rawMessage.contains('connection reset') ||
+        rawMessage.contains('connection closed') ||
+        rawMessage.contains('receiving data') ||
+        rawMessage.contains('software caused connection abort') ||
+        rawMessage.contains('connection abort') ||
+        rawMessage.contains('connection aborted') ||
+        rawMessage.contains('errno = 103') ||
+        rawMessage.contains('failed host lookup') ||
+        rawMessage.contains('network is unreachable') ||
+        rawMessage.contains('no address associated with hostname') ||
+        rawMessage.contains('connection timed out') ||
+        rawMessage.contains('statuscode: null');
   }
 
   static Map<String, Object> _sanitize(Map<String, Object?> values) {

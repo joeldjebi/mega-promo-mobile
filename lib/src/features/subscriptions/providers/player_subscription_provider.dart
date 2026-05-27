@@ -13,7 +13,7 @@ const _fallbackPaymentMethods = [
     country: 'Côte d’Ivoire',
     paymentUrl: 'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/',
     instructions:
-        'Paie avec Wave, puis envoie la capture ou la référence de paiement pour validation.',
+        'Suis les instructions, puis envoie la capture ou la référence pour validation.',
     proofPhone: '+225 0758754662',
     isActive: true,
     orderIndex: 1,
@@ -178,7 +178,7 @@ class PaymentMethodOption {
   factory PaymentMethodOption.fromJson(Map<String, dynamic> json) {
     return PaymentMethodOption(
       id: json['id'] as String,
-      name: json['name'] as String? ?? 'Paiement',
+      name: json['name'] as String? ?? 'Validation',
       operatorKey: json['operator_key'] as String? ?? 'manual',
       country: json['country'] as String? ?? 'Côte d’Ivoire',
       paymentUrl: json['payment_url'] as String? ?? '',

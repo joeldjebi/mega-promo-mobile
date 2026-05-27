@@ -29,7 +29,7 @@ class PaymentOperatorOption {
   factory PaymentOperatorOption.fromJson(Map<String, dynamic> json) {
     return PaymentOperatorOption(
       json['operator_key'] as String? ?? '',
-      json['name'] as String? ?? 'Mobile Money',
+      json['name'] as String? ?? 'Opérateur',
     );
   }
 }
@@ -87,7 +87,7 @@ class PlayerPaymentMethod {
     return PlayerPaymentMethod(
       id: json['id'] as String? ?? '',
       operatorKey: json['operator_key'] as String? ?? 'mobile_money',
-      operatorName: json['operator_name'] as String? ?? 'Mobile Money',
+      operatorName: json['operator_name'] as String? ?? 'Opérateur',
       phone: json['phone'] as String? ?? '',
       label: json['label'] as String? ?? '',
       isPrimary: json['is_primary'] as bool? ?? false,

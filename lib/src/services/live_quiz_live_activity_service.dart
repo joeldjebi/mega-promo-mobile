@@ -12,7 +12,7 @@ class LiveQuizLiveActivityService {
     required String contestId,
     required String title,
     required DateTime startsAt,
-    String prizeLabel = 'Gain surprise',
+    String prizeLabel = 'Récompense surprise',
     int registeredCount = 0,
     int connectedCount = 0,
   }) async {

@@ -48,9 +48,10 @@ class RewardPrize {
     return RewardPrize(
       id: json['id'] as String,
       contestId: contestId,
-      contestTitle: contest?['title'] as String? ?? 'Concours MegaPromo',
+      contestTitle: contest?['title'] as String? ?? 'Quiz MegaPromo',
       isLiveQuiz: contest?['is_live'] as bool? ?? false,
-      description: json['prize_description'] as String? ?? 'Gain MegaPromo',
+      description:
+          json['prize_description'] as String? ?? 'Récompense MegaPromo',
       value: json['prize_value'] as num? ?? 0,
       status: json['status'] as String? ?? 'pending',
       rewardType: json['reward_type'] as String? ?? 'mobile_money',
@@ -114,9 +115,10 @@ class WinnerVictoryDetail {
       reward: RewardPrize(
         id: winner['id'] as String? ?? '',
         contestId: contestId,
-        contestTitle: contest['title'] as String? ?? 'Concours MegaPromo',
+        contestTitle: contest['title'] as String? ?? 'Quiz MegaPromo',
         isLiveQuiz: contest['is_live'] as bool? ?? false,
-        description: winner['prize_description'] as String? ?? 'Gain MegaPromo',
+        description:
+            winner['prize_description'] as String? ?? 'Récompense MegaPromo',
         value: winner['prize_value'] as num? ?? 0,
         status: winner['status'] as String? ?? 'pending',
         rewardType: winner['reward_type'] as String? ?? 'mobile_money',
@@ -155,7 +157,7 @@ class VictoryContest {
   factory VictoryContest.fromJson(Map<String, dynamic> json) {
     return VictoryContest(
       id: json['id'] as String? ?? '',
-      title: json['title'] as String? ?? 'Concours MegaPromo',
+      title: json['title'] as String? ?? 'Quiz MegaPromo',
       imageUrl: json['image_url'] as String? ?? '',
       isLiveQuiz: json['is_live'] as bool? ?? false,
     );

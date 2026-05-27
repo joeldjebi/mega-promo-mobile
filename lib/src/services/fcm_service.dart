@@ -283,7 +283,7 @@ class FcmService {
           callback: (payload) {
             final notification = payload.newRecord;
             final title =
-                notification['title'] as String? ?? 'Nouveau concours';
+                notification['title'] as String? ?? 'Nouveau quiz';
             final type = notification['type'] as String? ?? 'info';
             debugPrint(
               '[FCM][in-app] notification received id=${notification['id']} '

@@ -245,7 +245,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               context,
                             ).scale(1);
                             final featuredHeight =
-                                236.0 + (math.max(0.0, textScale - 1) * 160.0);
+                                248.0 + (math.max(0.0, textScale - 1) * 172.0);
                             final itemWidth = boosted.length == 1
                                 ? constraints.maxWidth
                                 : 274.0;

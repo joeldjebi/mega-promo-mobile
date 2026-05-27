@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,50 +93,59 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _saveResult());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_saveResult());
+    });
   }
 
   Future<void> _saveResult() async {
-    if (_saved) return;
+    if (_saved || !mounted) return;
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
+    _saved = true;
+    final contestId = widget.contestId;
+    final participationId = widget.participationId;
+    final totalQuestions = widget.questions.length;
+    final points = _points;
+    final durationMs = _durationMs;
+    final correctCount = _correct;
     final profile = await ref.read(userProfileProvider.future);
     final answersPayload = widget.answers
         .map((answer) => answer.toJson())
         .toList();
 
-    if (widget.participationId.isNotEmpty) {
+    if (participationId.isNotEmpty) {
       await supabase
           .from('participations')
           .update({
-            'score': _points,
+            'score': points,
             'answers': {
               'type': 'quiz',
               'status': 'completed',
               'completed_at': DateTime.now().toIso8601String(),
-              'duration_ms': _durationMs,
-              'correct_count': _correct,
-              'total_questions': widget.questions.length,
+              'duration_ms': durationMs,
+              'correct_count': correctCount,
+              'total_questions': totalQuestions,
               'items': answersPayload,
             },
             'completed': true,
           })
-          .eq('id', widget.participationId)
+          .eq('id', participationId)
           .eq('user_id', user.id);
     } else {
       await supabase.from('participations').insert({
         'user_id': user.id,
-        'contest_id': widget.contestId,
-        'score': _points,
+        'contest_id': contestId,
+        'score': points,
         'answers': {
           'type': 'quiz',
           'status': 'completed',
           'completed_at': DateTime.now().toIso8601String(),
-          'duration_ms': _durationMs,
-          'correct_count': _correct,
-          'total_questions': widget.questions.length,
+          'duration_ms': durationMs,
+          'correct_count': correctCount,
+          'total_questions': totalQuestions,
           'items': answersPayload,
         },
         'completed': true,
@@ -152,20 +163,20 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
 
     await supabase
         .from('users')
-        .update({'points_total': profile.pointsTotal + _points})
+        .update({'points_total': profile.pointsTotal + points})
         .eq('id', user.id);
 
     await awardBadgesAfterParticipation(
       supabase: supabase,
       profile: profile,
-      nextParticipationsToday: widget.participationId.isNotEmpty
+      nextParticipationsToday: participationId.isNotEmpty
           ? profile.participationsToday
           : profile.participationsToday + 1,
-      nextPointsTotal: profile.pointsTotal + _points,
+      nextPointsTotal: profile.pointsTotal + points,
     );
 
+    if (!mounted) return;
     ref.invalidate(userProfileProvider);
-    _saved = true;
   }
 
   @override

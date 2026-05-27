@@ -27,7 +27,7 @@ class SplashPage extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'La plateforme ivoirienne des concours et défis gratuits.',
+                'La plateforme ivoirienne des quiz promotionnels gratuits.',
                 style: AppTextStyles.titleMedium.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -41,7 +41,7 @@ class SplashPage extends StatelessWidget {
                     Text('Prêt à jouer ?', style: AppTextStyles.titleLarge),
                     const SizedBox(height: 16),
                     Text(
-                      'Découvre les concours boostés, gagne des points et tente ta chance chaque jour.',
+                      'Découvre les produits des marques, réponds aux quiz et cumule des points chaque jour.',
                       style: AppTextStyles.bodyLarge,
                     ),
                     const SizedBox(height: 24),
@@ -55,7 +55,7 @@ class SplashPage extends StatelessWidget {
               const Spacer(),
               Center(
                 child: Text(
-                  'Concours • Quiz • Tirages au sort',
+                  'Quiz produits • Défis • Récompenses',
                   style: AppTextStyles.bodyMedium,
                 ),
               ),
@@ -237,16 +237,16 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Concours actifs', style: AppTextStyles.titleLarge),
+            Text('Quiz actifs', style: AppTextStyles.titleLarge),
             const SizedBox(height: 16),
             AppCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Concours boosté', style: AppTextStyles.titleMedium),
+                  Text('Quiz de marque', style: AppTextStyles.titleMedium),
                   const SizedBox(height: 8),
                   Text(
-                    'Exemple de concours affiché ici.',
+                    'Exemple de quiz promotionnel affiché ici.',
                     style: AppTextStyles.bodyLarge,
                   ),
                 ],

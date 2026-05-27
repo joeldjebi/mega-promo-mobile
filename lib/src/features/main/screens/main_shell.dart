@@ -32,7 +32,7 @@ class MainShell extends ConsumerStatefulWidget {
     _NavItem('/home', Icons.home_rounded, 'Accueil'),
     _NavItem('/contests', Icons.emoji_events_rounded, 'Jeux'),
     _NavItem('/leaderboard', Icons.leaderboard_rounded, 'Classement'),
-    _NavItem('/rewards', Icons.card_giftcard_rounded, 'Gains'),
+    _NavItem('/rewards', Icons.card_giftcard_rounded, 'Récompenses'),
     _NavItem('/profile', Icons.person_rounded, 'Profil'),
   ];
 

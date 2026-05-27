@@ -18,6 +18,7 @@ import '../features/leaderboard/screens/leaderboard_screen.dart';
 import '../features/legal/screens/legal_page_screen.dart';
 import '../features/live_quiz/screens/live_quiz_waiting_screen.dart';
 import '../features/main/screens/main_shell.dart';
+import '../features/maintenance/screens/maintenance_screen.dart';
 import '../features/notifications/screens/notifications_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/quiz/models/question.dart';
@@ -25,12 +26,14 @@ import '../features/quiz/screens/quiz_result_screen.dart';
 import '../features/quiz/screens/quiz_screen.dart';
 import '../features/rewards/screens/rewards_screen.dart';
 import '../features/rewards/screens/reward_victory_screen.dart';
+import '../features/settings/providers/app_feature_flags_provider.dart';
 import '../features/subscriptions/screens/player_plans_screen.dart';
 import '../services/app_telemetry_service.dart';
 import '../services/fcm_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final supabase = ref.watch(supabaseProvider);
+  final appFeatureFlags = ref.watch(appFeatureFlagsProvider);
   final routerRefresh = GoRouterRefreshStream(supabase.auth.onAuthStateChange);
   ref.onDispose(routerRefresh.dispose);
 
@@ -51,6 +54,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final location = state.uri.path;
       final goingToLogin = location == '/login';
       final goingToSplash = location == '/splash';
+      final goingToMaintenance = location == '/maintenance';
       final goingToVerifyOtp = location == '/verify-otp';
       final goingToLegal = location.startsWith('/legal/');
       final goingToAccountReactivation = location == '/account/reactivation';
@@ -70,13 +74,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       final goingToProtectedRoute =
           goingToMainRoute || goingToOnboarding || goingToAccountReactivation;
       final goingToAuthRoute =
-          goingToLogin || goingToSplash || goingToVerifyOtp || goingToLegal;
+          goingToLogin ||
+          goingToSplash ||
+          goingToMaintenance ||
+          goingToVerifyOtp ||
+          goingToLegal;
 
       if (!isLogged && goingToProtectedRoute) {
         return '/login';
       }
 
       if (isLogged) {
+        final maintenanceRedirect = await _maintenanceRedirect(
+          userId: currentUser.id,
+          goingToMaintenance: goingToMaintenance,
+          maintenanceEnabled:
+              appFeatureFlags.asData?.value.appMaintenanceEnabled,
+        );
+        if (maintenanceRedirect != null) return maintenanceRedirect;
+
         final accountRedirect = await _accountStatusRedirect(
           userId: currentUser.id,
           goingToAccountReactivation: goingToAccountReactivation,
@@ -100,6 +116,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const SplashScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(
+        path: '/maintenance',
+        builder: (context, state) => const MaintenanceScreen(),
+      ),
       GoRoute(
         path: '/legal/:key',
         builder: (context, state) =>
@@ -216,6 +236,51 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+Future<String?> _maintenanceRedirect({
+  required String userId,
+  required bool goingToMaintenance,
+  required bool? maintenanceEnabled,
+}) async {
+  if (maintenanceEnabled == null) return null;
+
+  if (!maintenanceEnabled) {
+    return goingToMaintenance ? '/home' : null;
+  }
+
+  final isAdmin = await _isAdminUser(userId);
+  if (isAdmin) return goingToMaintenance ? '/home' : null;
+
+  return goingToMaintenance ? null : '/maintenance';
+}
+
+Future<bool> _isAdminUser(String userId) async {
+  try {
+    final profile = await Supabase.instance.client
+        .from('users')
+        .select('role, is_active')
+        .eq('id', userId)
+        .maybeSingle();
+    if (profile == null) return false;
+    final role = (profile['role'] as String? ?? '').toLowerCase().trim();
+    final isActive = profile['is_active'] as bool? ?? true;
+    return isActive &&
+        (role == 'admin' ||
+            role == 'super_admin' ||
+            role == 'super-admin' ||
+            role == 'sa');
+  } catch (error, stackTrace) {
+    debugPrint('[ROUTER][maintenanceRole] skipped: $error');
+    unawaited(
+      AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'maintenance_role_check_failed',
+      ),
+    );
+    return false;
+  }
+}
 
 Future<String?> _accountStatusRedirect({
   required String userId,

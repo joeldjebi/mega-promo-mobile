@@ -14,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../providers/player_payment_methods_provider.dart';
 import '../providers/profile_provider.dart';
 
@@ -35,6 +36,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final profile = _lastProfileData == null
         ? watchedProfile
         : AsyncData(_lastProfileData!);
+    final featureFlags = ref.watch(appFeatureFlagsProvider).maybeWhen(
+          data: (flags) => flags,
+          orElse: () => AppFeatureFlags.defaults,
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F5F9),
@@ -42,6 +47,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         child: profile.when(
           data: (data) => _CompactProfilePage(
             data: data,
+            showPlansAction: featureFlags.playerSubscriptionsEnabled,
             onEdit: () => _showEditProfileSheet(context, ref, data),
           ),
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -63,9 +69,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
 class _CompactProfilePage extends StatelessWidget {
   final ProfileData data;
+  final bool showPlansAction;
   final VoidCallback onEdit;
 
-  const _CompactProfilePage({required this.data, required this.onEdit});
+  const _CompactProfilePage({
+    required this.data,
+    required this.showPlansAction,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +113,7 @@ class _CompactProfilePage extends StatelessWidget {
                   height: isCompact ? 278 : 318,
                   child: _ProfileActionPanel(
                     data: data,
+                    showPlansAction: showPlansAction,
                     isCompact: isCompact,
                     onEdit: onEdit,
                   ),
@@ -478,7 +490,7 @@ class _ProfileStatsStrip extends StatelessWidget {
           const _CompactDivider(),
           Expanded(
             child: _CompactStat(
-              label: 'Gains',
+              label: 'Récompenses',
               value: '${data.wins.length}',
               icon: Icons.card_giftcard_rounded,
               isCompact: isCompact,
@@ -557,11 +569,13 @@ class _CompactDivider extends StatelessWidget {
 
 class _ProfileActionPanel extends StatelessWidget {
   final ProfileData data;
+  final bool showPlansAction;
   final bool isCompact;
   final VoidCallback onEdit;
 
   const _ProfileActionPanel({
     required this.data,
+    required this.showPlansAction,
     required this.isCompact,
     required this.onEdit,
   });
@@ -569,17 +583,18 @@ class _ProfileActionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actions = [
-      _ProfileAction(
-        icon: Icons.workspace_premium_rounded,
-        title: 'Forfait',
-        subtitle:
-            '${data.user.dailyParticipationLimit}/jour · +${data.user.bonusTickets} ticket',
-        onTap: () => context.push('/subscriptions'),
-      ),
+      if (showPlansAction)
+        _ProfileAction(
+          icon: Icons.workspace_premium_rounded,
+          title: 'Forfait',
+          subtitle:
+              '${data.user.dailyParticipationLimit}/jour · +${data.user.bonusTickets} participation',
+          onTap: () => context.push('/subscriptions'),
+        ),
       _ProfileAction(
         icon: Icons.notifications_none_rounded,
         title: 'Notifications',
-        subtitle: 'Alertes et gains',
+        subtitle: 'Alertes et récompenses',
         onTap: () => context.push('/notifications'),
       ),
       _ProfileAction(
@@ -597,11 +612,11 @@ class _ProfileActionPanel extends StatelessWidget {
       ),
       _ProfileAction(
         icon: Icons.card_giftcard_rounded,
-        title: 'Gains',
+        title: 'Récompenses',
         subtitle: data.wins.isEmpty ? 'Aucun' : '${data.wins.length} récents',
         onTap: () => _showProfileActivitySheet(
           context,
-          title: 'Tous mes gains',
+          title: 'Toutes mes récompenses',
           icon: Icons.card_giftcard_rounded,
           loader: () => fetchProfileWinsPage(limit: 50),
         ),
@@ -614,11 +629,16 @@ class _ProfileActionPanel extends StatelessWidget {
       ),
       _ProfileAction(
         icon: Icons.account_balance_wallet_rounded,
-        title: 'Paiement',
-        subtitle: 'Mobile Money',
+        title: 'Coordonnées',
+        subtitle: 'Coordonnées',
         onTap: () => _showPaymentMethodsSheet(context),
       ),
     ];
+
+    final actionRows = <List<_ProfileAction>>[];
+    for (var index = 0; index < actions.length; index += 2) {
+      actionRows.add(actions.skip(index).take(2).toList());
+    }
 
     return Container(
       padding: EdgeInsets.all(isCompact ? 10 : 12),
@@ -629,65 +649,30 @@ class _ProfileActionPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[0],
-                    isCompact: isCompact,
+          for (var rowIndex = 0; rowIndex < actionRows.length; rowIndex++) ...[
+            if (rowIndex > 0) const SizedBox(height: 10),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _ProfileActionTile(
+                      action: actionRows[rowIndex][0],
+                      isCompact: isCompact,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[1],
-                    isCompact: isCompact,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: actionRows[rowIndex].length > 1
+                        ? _ProfileActionTile(
+                            action: actionRows[rowIndex][1],
+                            isCompact: isCompact,
+                          )
+                        : const SizedBox.shrink(),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[2],
-                    isCompact: isCompact,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[3],
-                    isCompact: isCompact,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[4],
-                    isCompact: isCompact,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ProfileActionTile(
-                    action: actions[5],
-                    isCompact: isCompact,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -808,7 +793,7 @@ class _PaymentMethodsSheet extends ConsumerWidget {
         child: profile.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, stackTrace) => const Center(
-            child: Text('Impossible de charger tes moyens de paiement.'),
+            child: Text('Impossible de charger tes coordonnées.'),
           ),
           data: (data) => ListView(
             controller: controller,
@@ -825,7 +810,7 @@ class _PaymentMethodsSheet extends ConsumerWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'Moyens de paiement',
+                'Coordonnées de réception',
                 style: AppTextStyles.h2.copyWith(
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w800,
@@ -833,7 +818,7 @@ class _PaymentMethodsSheet extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Ces informations servent uniquement à payer tes gains. Mega Promo voit le numéro choisi pour envoyer ton Mobile Money. Tu peux ajouter un premier numéro librement. Pour modifier un numéro ou en ajouter un deuxième, une vérification d’identité est requise.',
+                'Ces informations servent uniquement à remettre tes récompenses promotionnelles. MegaPromo voit le numéro choisi pour organiser la remise avec toi. Tu peux ajouter un premier numéro librement. Pour modifier un numéro ou en ajouter un deuxième, une vérification d’identité est requise.',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 16),
@@ -861,7 +846,7 @@ class _PaymentMethodsSheet extends ConsumerWidget {
                 const SizedBox(height: 6),
                 AppButton(
                   text: data.methods.isEmpty
-                      ? 'Ajouter mon numéro Mobile Money'
+                      ? 'Ajouter mon numéro de réception'
                       : 'Ajouter un deuxième numéro',
                   icon: Icons.add_card_rounded,
                   onPressed: () {
@@ -964,7 +949,7 @@ class _EmptyPaymentMethodCard extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Aucun numéro enregistré. Ajoute ton Mobile Money préféré pour recevoir tes gains plus vite.',
+              'Aucun numéro enregistré. Ajoute ton numéro préféré pour recevoir tes récompenses plus vite.',
               style: AppTextStyles.bodySecondary,
             ),
           ),
@@ -1066,8 +1051,8 @@ class _KycRequiredSheetState extends ConsumerState<_KycRequiredSheet> {
         ? 'Vérification en cours'
         : 'Vérification d’identité';
     final description = latestStatus == 'pending'
-        ? 'Ton document est déjà envoyé. MegaPromo doit le valider avant que tu puisses ajouter un 2e numéro ou modifier un Mobile Money existant.'
-        : 'Pour ajouter un 2e numéro ou modifier un Mobile Money existant, MegaPromo doit confirmer que le compte t’appartient. Cela protège tes gains contre les changements frauduleux.';
+        ? 'Ton document est déjà envoyé. MegaPromo doit le valider avant que tu puisses ajouter un 2e numéro ou modifier un numéro existant.'
+        : 'Pour ajouter un 2e numéro ou modifier un numéro existant, MegaPromo doit confirmer que le compte t’appartient. Cela protège tes récompenses contre les changements frauduleux.';
 
     final maxSheetHeight = MediaQuery.sizeOf(context).height * 0.86;
 
@@ -1408,18 +1393,18 @@ class _SavePaymentMethodSheetState
         children: [
           Text(
             widget.method == null
-                ? 'Ajouter un Mobile Money'
-                : 'Modifier ce Mobile Money',
+                ? 'Ajouter un numéro de réception'
+                : 'Modifier ce numéro',
             style: AppTextStyles.h2,
           ),
           const SizedBox(height: 8),
           Text(
-            'En enregistrant ce numéro, tu autorises MegaPromo à l’utiliser pour payer tes gains. Vérifie bien le pays, l’indicatif et le numéro : une erreur peut retarder ou empêcher le paiement.',
+            'En enregistrant ce numéro, tu autorises MegaPromo à l’utiliser pour organiser la remise de tes récompenses. Vérifie bien le pays, l’indicatif et le numéro : une erreur peut retarder la remise.',
             style: AppTextStyles.bodySecondary,
           ),
           const SizedBox(height: 16),
           _NativeSelectField(
-            label: 'Mobile Money',
+            label: 'Opérateur',
             value: _operatorKey,
             options: availableOperators
                 .map(
@@ -1469,7 +1454,7 @@ class _SavePaymentMethodSheetState
               ),
             ],
             decoration: InputDecoration(
-              labelText: 'Numéro Mobile Money',
+              labelText: 'Numéro de réception',
               prefixText: '${selectedCountry.dialCode} ',
               hintText: _phoneHint(selectedCountry.phoneDigits),
               helperText:
@@ -1488,7 +1473,7 @@ class _SavePaymentMethodSheetState
               style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w700),
             ),
             subtitle: Text(
-              'MegaPromo pourra l’utiliser pour te contacter si un paiement nécessite une vérification.',
+              'MegaPromo pourra l’utiliser pour te contacter si une remise nécessite une vérification.',
               style: AppTextStyles.bodySmall.copyWith(
                 color: AppColors.textHint,
               ),
@@ -2063,7 +2048,7 @@ class _StatsPanel extends StatelessWidget {
           Expanded(
             child: _StatTile(
               icon: Icons.card_giftcard_rounded,
-              label: 'Gains',
+              label: 'Récompenses',
               value: '${data.wins.length}',
             ),
           ),

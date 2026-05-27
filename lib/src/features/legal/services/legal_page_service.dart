@@ -47,7 +47,7 @@ class LegalPageService {
         key: 'privacy',
         title: 'Politique de confidentialité',
         content:
-            'MegaPromo collecte les informations nécessaires au fonctionnement du service, à la sécurité des concours et au traitement des gains.',
+            'MegaPromo collecte les informations nécessaires au fonctionnement du service, à la sécurité des quiz promotionnels et au traitement des récompenses.',
         updatedAt: null,
       );
     }
@@ -56,7 +56,7 @@ class LegalPageService {
       key: 'terms',
       title: 'Conditions générales d’utilisation',
       content:
-          'En utilisant MegaPromo, tu acceptes les règles des concours affichées dans l’application et l’usage personnel de ton compte joueur.',
+          'En utilisant MegaPromo, tu acceptes les règles des quiz promotionnels affichées dans l’application et l’usage personnel de ton compte joueur.',
       updatedAt: null,
     );
   }

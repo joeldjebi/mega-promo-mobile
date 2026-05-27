@@ -9,6 +9,7 @@ import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../providers/player_subscription_provider.dart';
 
 const _wavePaymentBaseUrl = 'https://pay.wave.com/m/M_ci_o6-9yu9h5hhm/c/ci/';
@@ -18,9 +19,14 @@ class PlayerPlansScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(playerPlansProvider);
+    final plans = ref.watch(playerPlansProvider);
+    final featureFlags = ref.watch(appFeatureFlagsProvider);
     final fromContestId =
         GoRouterState.of(context).uri.queryParameters['fromContest'];
+    final plansContent = _PlansContent(
+      plans: plans,
+      fromContestId: fromContestId,
+    );
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -40,70 +46,145 @@ class PlayerPlansScreen extends ConsumerWidget {
         title: const Text('Mon forfait'),
       ),
       body: SafeArea(
-        child: data.when(
-          data: (data) => RefreshIndicator(
-            onRefresh: () => ref.refresh(playerPlansProvider.future),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-              children: [
-                _CurrentSubscriptionCard(
-                  subscription: data.currentSubscription,
-                ),
-                const SizedBox(height: 16),
-                Text('Choisir un forfait', style: AppTextStyles.h2),
-                const SizedBox(height: 12),
-                ...data.plans.map(
-                  (plan) => Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: _PlanCard(
-                      plan: plan,
-                      currentSubscription: data.currentSubscription,
-                      paymentMethods: data.paymentMethods,
-                      onSubscribe: () => _confirmSubscription(
-                        context,
-                        ref,
-                        plan,
-                        data.paymentMethods,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        child: featureFlags.when(
+          data: (flags) => flags.playerSubscriptionsEnabled
+              ? plansContent
+              : _PlansUnavailable(fromContestId: fromContestId),
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, stackTrace) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.workspace_premium_rounded,
-                    color: AppColors.textHint,
-                    size: 44,
+          error: (error, stackTrace) => plansContent,
+        ),
+      ),
+    );
+  }
+}
+
+class _PlansContent extends ConsumerWidget {
+  final AsyncValue<PlayerPlansData> plans;
+  final String? fromContestId;
+
+  const _PlansContent({
+    required this.plans,
+    required this.fromContestId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return plans.when(
+      data: (data) => RefreshIndicator(
+        onRefresh: () => ref.refresh(playerPlansProvider.future),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          children: [
+            _CurrentSubscriptionCard(
+              subscription: data.currentSubscription,
+            ),
+            const SizedBox(height: 16),
+            Text('Choisir un forfait', style: AppTextStyles.h2),
+            const SizedBox(height: 12),
+            ...data.plans.map(
+              (plan) => Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: _PlanCard(
+                  plan: plan,
+                  currentSubscription: data.currentSubscription,
+                  paymentMethods: data.paymentMethods,
+                  onSubscribe: () => _confirmSubscription(
+                    context,
+                    ref,
+                    plan,
+                    data.paymentMethods,
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Forfaits indisponibles',
-                    style: AppTextStyles.h2,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Vérifie ta connexion ou les accès Supabase.',
-                    style: AppTextStyles.bodySecondary,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 18),
-                  AppButton(
-                    text: 'Réessayer',
-                    isOutlined: true,
-                    onPressed: () => ref.invalidate(playerPlansProvider),
-                  ),
-                ],
+                ),
               ),
             ),
+          ],
+        ),
+      ),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stackTrace) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.workspace_premium_rounded,
+                color: AppColors.textHint,
+                size: 44,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Forfaits indisponibles',
+                style: AppTextStyles.h2,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Vérifie ta connexion ou les accès Supabase.',
+                style: AppTextStyles.bodySecondary,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 18),
+              AppButton(
+                text: 'Réessayer',
+                isOutlined: true,
+                onPressed: () => ref.invalidate(playerPlansProvider),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlansUnavailable extends StatelessWidget {
+  final String? fromContestId;
+
+  const _PlansUnavailable({required this.fromContestId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: AppCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.lock_clock_rounded,
+                color: AppColors.textHint,
+                size: 42,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Forfaits indisponibles',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.h2.copyWith(fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Cette section est temporairement désactivée.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySecondary,
+              ),
+              const SizedBox(height: 16),
+              AppButton(
+                text: 'Retour',
+                isOutlined: true,
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else if (fromContestId?.isNotEmpty == true) {
+                    context.go('/contests/$fromContestId');
+                  } else {
+                    context.go('/profile');
+                  }
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -154,7 +235,7 @@ class _CurrentSubscriptionCard extends StatelessWidget {
                   subscription == null
                       ? 'Sélectionne un forfait pour obtenir plus d’avantages.'
                       : isPending
-                      ? 'En attente de validation du paiement.'
+                      ? 'En attente de validation.'
                       : 'Valide jusqu’au ${_formatDate(subscription!.expiresAt)}.',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -235,7 +316,7 @@ class _PlanCard extends StatelessWidget {
               ),
               _PlanMetric(
                 icon: Icons.local_activity_rounded,
-                label: '+${plan.bonusTickets} ticket',
+                label: '+${plan.bonusTickets} participation',
               ),
               _PlanMetric(
                 icon: Icons.military_tech_rounded,
@@ -367,8 +448,8 @@ Future<void> _confirmSubscription(
           plan.price == 0
               ? 'Forfait activé.'
               : paymentLinkOpened
-              ? 'Paiement en attente. Envoie la preuve${proofPhone?.isNotEmpty == true ? ' au $proofPhone' : ''}.'
-              : 'Souscription créée, mais le lien de paiement ne s’est pas ouvert.',
+              ? 'Validation en attente. Envoie la preuve${proofPhone?.isNotEmpty == true ? ' au $proofPhone' : ''}.'
+              : 'Souscription créée, mais le lien de validation ne s’est pas ouvert.',
         ),
       ),
     );
@@ -479,12 +560,12 @@ class _SubscriptionConfirmationSheetState
               ),
               const SizedBox(height: 12),
               Text(
-                'Paiement indisponible',
+                'Validation indisponible',
                 style: AppTextStyles.h2.copyWith(fontSize: 18),
               ),
               const SizedBox(height: 8),
               Text(
-                'Aucun opérateur de paiement actif pour le moment.',
+                'Aucun opérateur actif pour le moment.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
               ),
@@ -519,7 +600,7 @@ class _SubscriptionConfirmationSheetState
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Sélectionne comment payer ${plan.name}. Après paiement, envoie la preuve pour validation.',
+                    'Sélectionne comment valider ${plan.name}. Ensuite, envoie la preuve pour validation.',
                     style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
                   ),
                   const SizedBox(height: 14),
@@ -549,7 +630,7 @@ class _SubscriptionConfirmationSheetState
                           _PaymentStep(
                             icon: Icons.info_outline_rounded,
                             text: selectedMethod.instructions.isEmpty
-                                ? 'Paie avec ${selectedMethod.name}, puis envoie la preuve.'
+                                ? 'Continue avec ${selectedMethod.name}, puis envoie la preuve.'
                                 : selectedMethod.instructions,
                           ),
                           if (selectedMethod.proofPhone.isNotEmpty) ...[
@@ -568,7 +649,7 @@ class _SubscriptionConfirmationSheetState
                   AppButton(
                     text: selectedMethod == null
                         ? 'Choisis un opérateur'
-                        : 'Payer avec ${selectedMethod.name}',
+                        : 'Continuer avec ${selectedMethod.name}',
                     icon: Icons.check_rounded,
                     height: 50,
                     onPressed: selectedMethod == null

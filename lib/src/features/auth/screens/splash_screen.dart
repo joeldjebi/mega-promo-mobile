@@ -104,7 +104,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                   curve: Curves.easeOutBack,
                 ),
             const SizedBox(height: 8),
-            Text('Joue. Gagne. Vis.', style: AppTextStyles.bodySecondary),
+            Text('Découvre. Réponds. Profite.', style: AppTextStyles.bodySecondary),
           ],
         ),
       ),

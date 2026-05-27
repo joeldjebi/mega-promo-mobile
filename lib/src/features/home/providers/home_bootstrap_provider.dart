@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../contests/models/contest.dart';
+import '../../../services/app_telemetry_service.dart';
 import '../../../services/synced_clock_service.dart';
 import 'user_profile_provider.dart';
 
@@ -193,30 +194,67 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
     }
   }
 
-  final profileFuture = fetchCurrentUserProfile(ref, userId: userId);
-  final contestsFuture = _fetchFallbackContests(supabase);
-  final registeredFuture = supabase
-      .from('live_quiz_registrations')
-      .select('contest_id')
-      .eq('user_id', userId)
-      .eq('status', 'registered');
-  final participatedFuture = supabase
-      .from('participations')
-      .select('contest_id')
-      .eq('user_id', userId);
-  final unreadFuture = supabase
-      .from('notifications')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('is_read', false);
+  UserProfile profile;
+  try {
+    profile = await fetchCurrentUserProfile(ref, userId: userId);
+  } catch (error, stackTrace) {
+    authLogError('homeBootstrapFallbackProfile', error, stackTrace);
+    if (AppTelemetryService.isRetryableNetworkError(error)) {
+      final cached = _cachedHomeBootstrap;
+      if (cached != null && cached.profile.id == userId) {
+        unawaited(
+          AppTelemetryService.recordError(
+            error,
+            stackTrace,
+            reason: 'home_bootstrap_fallback_profile_network',
+          ),
+        );
+        return cached;
+      }
+    }
+    rethrow;
+  }
 
-  final profile = await profileFuture;
-  final contests = (await contestsFuture)
-      .where((contest) => contest.isAccessibleForPlan(profile.planKey))
-      .toList();
-  final registeredRows = await registeredFuture;
-  final participatedRows = await participatedFuture;
-  final unreadRows = await unreadFuture;
+  var contests = const <Contest>[];
+  try {
+    contests = (await _fetchFallbackContests(supabase))
+        .where((contest) => contest.isAccessibleForPlan(profile.planKey))
+        .toList();
+  } catch (error, stackTrace) {
+    authLogError('homeBootstrapFallbackContests', error, stackTrace);
+    if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
+    unawaited(
+      AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'home_bootstrap_fallback_contests_network',
+      ),
+    );
+    contests = _cachedHomeBootstrap?.profile.id == userId
+        ? _cachedHomeBootstrap!.contests
+        : const <Contest>[];
+  }
+
+  final registeredRows = await _selectRowsOrEmpty(
+    supabase
+        .from('live_quiz_registrations')
+        .select('contest_id')
+        .eq('user_id', userId)
+        .eq('status', 'registered'),
+    reason: 'home_bootstrap_fallback_registered_network',
+  );
+  final participatedRows = await _selectRowsOrEmpty(
+    supabase.from('participations').select('contest_id').eq('user_id', userId),
+    reason: 'home_bootstrap_fallback_participated_network',
+  );
+  final unreadRows = await _selectRowsOrEmpty(
+    supabase
+        .from('notifications')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('is_read', false),
+    reason: 'home_bootstrap_fallback_unread_network',
+  );
 
   final data = HomeBootstrapData(
     profile: profile,
@@ -235,6 +273,23 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   _cachedHomeBootstrap = data;
   _cachedHomeBootstrapAt = DateTime.now();
   return data;
+}
+
+Future<List<dynamic>> _selectRowsOrEmpty(
+  dynamic query, {
+  required String reason,
+}) async {
+  try {
+    final rows = await query;
+    return rows is List ? rows : const <dynamic>[];
+  } catch (error, stackTrace) {
+    authLogError(reason, error, stackTrace);
+    if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
+    unawaited(
+      AppTelemetryService.recordError(error, stackTrace, reason: reason),
+    );
+    return const <dynamic>[];
+  }
 }
 
 Future<HomeBootstrapData?> _readStoredHomeBootstrap(String userId) async {

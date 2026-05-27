@@ -31,8 +31,11 @@ class LiveQuizWaitingScreen extends ConsumerStatefulWidget {
 class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     with WidgetsBindingObserver {
   Timer? _timer;
+  Timer? _connectionQualityTimer;
   RealtimeChannel? _waitingRefreshChannel;
   DateTime? _backgroundedAt;
+  DateTime? _lastRealtimeUpdateAt;
+  DateTime? _lastNetworkIssueAt;
   bool _isJoining = false;
   bool _isStarting = false;
   bool _hasJoinedWaitingRoom = false;
@@ -42,7 +45,10 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
   bool _hasPreloadedAssets = false;
   bool _isArenaWindowOpen = false;
   bool _finalClockSyncDone = false;
+  bool _isCheckingConnectionQuality = false;
   Duration _remaining = Duration.zero;
+  Duration? _lastServerLatency;
+  int _connectionQuality = 72;
   int? _lastRenderedServerSecond;
   String? _lastLiveActivitySignature;
   String? _preloadedAssetsSignature;
@@ -60,6 +66,7 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     unawaited(AppTelemetryService.setContext({'contest_id': widget.contestId}));
     _subscribeWaitingUpdates();
     unawaited(SyncedClockService.sync(force: true).whenComplete(_startTicker));
+    _startConnectionQualityChecks();
     WidgetsBinding.instance.addPostFrameCallback((_) => _joinWaitingRoom());
   }
 
@@ -67,6 +74,7 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _connectionQualityTimer?.cancel();
     final channel = _waitingRefreshChannel;
     if (channel != null) {
       unawaited(Supabase.instance.client.removeChannel(channel));
@@ -92,6 +100,7 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
 
     if (inactiveFor >= const Duration(seconds: 20)) {
       unawaited(SyncedClockService.sync(force: true));
+      unawaited(_checkConnectionQuality());
       clearContestDetailCache(widget.contestId);
       ref.invalidate(contestDetailProvider(widget.contestId));
       QuizAssetPreloadService.clearContest(widget.contestId);
@@ -131,6 +140,8 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     final supabase = Supabase.instance.client;
 
     void refreshWaitingState(PostgresChangePayload payload) {
+      _lastRealtimeUpdateAt = DateTime.now();
+      _recomputeConnectionQuality();
       clearContestDetailCache(widget.contestId);
       ref.invalidate(contestDetailProvider(widget.contestId));
     }
@@ -183,9 +194,14 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
         params: {'p_contest_id': widget.contestId},
       );
       _hasJoinedWaitingRoom = true;
+      _recomputeConnectionQuality();
       clearContestDetailCache(widget.contestId);
       ref.invalidate(contestDetailProvider(widget.contestId));
-    } catch (_) {
+    } catch (error) {
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        _lastNetworkIssueAt = DateTime.now();
+        _recomputeConnectionQuality();
+      }
       // The screen still acts as the waiting surface if the player is already in
       // the room or if the server window just changed while navigating.
     } finally {
@@ -355,93 +371,187 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
                       icon: const Icon(Icons.arrow_back_rounded),
                     ),
                   ),
-                  const Spacer(),
-                  Container(
-                    width: 108,
-                    height: 108,
-                    margin: const EdgeInsets.only(bottom: 22),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppColors.primary.withValues(alpha: 0.16),
-                      border: Border.all(
-                        color: AppColors.primaryLight.withValues(alpha: 0.34),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.24),
-                          blurRadius: 38,
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.bolt_rounded,
-                      color: AppColors.primaryLight,
-                      size: 54,
-                    ),
-                  ),
-                  Text(
-                    'Salle d’attente',
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.h1,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    data.contest.title,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodySecondary,
-                  ),
-                  const SizedBox(height: 26),
-                  AppCard(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      children: [
-                        Text('Départ dans', style: AppTextStyles.label),
-                        const SizedBox(height: 10),
-                        Text(
-                          _formatDuration(effectiveRemaining),
-                          style: AppTextStyles.h1.copyWith(
-                            color: AppColors.primaryLight,
-                            fontSize: 42,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          '${data.contest.registeredCount} inscrit(s) · ${data.contest.connectedCount} prêt(s)',
-                          style: AppTextStyles.bodySecondary,
-                        ),
-                        if (arenaWindowOpen &&
-                            (_isPreloadingAssets || !_hasPreloadedAssets)) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            'Chargement de l’arène...',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.primaryLight,
-                              fontWeight: FontWeight.w700,
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isTight = constraints.maxHeight < 560;
+                        final isVeryTight = constraints.maxHeight < 480;
+                        final iconSize = isVeryTight
+                            ? 58.0
+                            : isTight
+                            ? 72.0
+                            : 92.0;
+                        final timerFontSize = isVeryTight
+                            ? 30.0
+                            : isTight
+                            ? 34.0
+                            : 40.0;
+                        final sectionGap = isVeryTight
+                            ? 8.0
+                            : isTight
+                            ? 10.0
+                            : 14.0;
+                        final cardPadding = isVeryTight
+                            ? 12.0
+                            : isTight
+                            ? 14.0
+                            : 16.0;
+
+                        return FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.topCenter,
+                          child: SizedBox(
+                            width: constraints.maxWidth,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(height: isVeryTight ? 2 : 8),
+                                Align(
+                                  child: Container(
+                                    width: iconSize,
+                                    height: iconSize,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: AppColors.primary.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                      border: Border.all(
+                                        color: AppColors.primaryLight
+                                            .withValues(alpha: 0.34),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primary.withValues(
+                                            alpha: 0.20,
+                                          ),
+                                          blurRadius: isVeryTight ? 22 : 32,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      Icons.bolt_rounded,
+                                      color: AppColors.primaryLight,
+                                      size: iconSize * 0.50,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: sectionGap),
+                                Text(
+                                  'Salle d’attente',
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.h1.copyWith(
+                                    fontSize: isVeryTight ? 24 : 28,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  data.contest.title,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.bodySecondary.copyWith(
+                                    fontSize: isVeryTight ? 12 : 13,
+                                  ),
+                                ),
+                                SizedBox(height: sectionGap),
+                                AppCard(
+                                  padding: EdgeInsets.all(cardPadding),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        'Départ dans',
+                                        style: AppTextStyles.label,
+                                      ),
+                                      const SizedBox(height: 6),
+                                      FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          _formatDuration(effectiveRemaining),
+                                          maxLines: 1,
+                                          style: AppTextStyles.h1.copyWith(
+                                            color: AppColors.primaryLight,
+                                            fontSize: timerFontSize,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        '${data.contest.registeredCount} inscrit(s) · ${data.contest.connectedCount} prêt(s)',
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: AppTextStyles.bodySecondary
+                                            .copyWith(
+                                              fontSize: isVeryTight ? 11 : 12,
+                                            ),
+                                      ),
+                                      if (arenaWindowOpen &&
+                                          (_isPreloadingAssets ||
+                                              !_hasPreloadedAssets)) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Chargement de l’arène...',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: AppTextStyles.bodySmall
+                                              .copyWith(
+                                                color: AppColors.primaryLight,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ] else if (arenaWindowOpen ||
+                                          _hasPreloadedAssets) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Arène prête',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: AppTextStyles.bodySmall
+                                              .copyWith(
+                                                color: AppColors.accentGreen,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(height: isVeryTight ? 8 : 10),
+                                _ConnectionQualityCard(
+                                  percent: _connectionQuality,
+                                  label: _connectionQualityLabel(
+                                    _connectionQuality,
+                                  ),
+                                  latency: _lastServerLatency,
+                                  isChecking: _isCheckingConnectionQuality,
+                                  compact: isTight,
+                                ),
+                                SizedBox(height: isVeryTight ? 7 : 10),
+                                AppCard(
+                                  padding: EdgeInsets.all(
+                                    isVeryTight ? 11 : 13,
+                                  ),
+                                  child: Text(
+                                    'Reste sur cette page. Le quiz démarre automatiquement à l’heure exacte.',
+                                    textAlign: TextAlign.center,
+                                    maxLines: isVeryTight ? 2 : 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.bodySecondary
+                                        .copyWith(
+                                          fontSize: isVeryTight ? 11 : 12,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                              ],
                             ),
                           ),
-                        ] else if (arenaWindowOpen || _hasPreloadedAssets) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            'Arène prête',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.accentGreen,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ],
+                        );
+                      },
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  AppCard(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      'Reste sur cette page. À l’heure exacte, le quiz démarre automatiquement. Si ton téléphone est verrouillé, le suivi Quiz Live reste visible sur iPhone compatible et en notification persistante sur Android.',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.bodySecondary,
-                    ),
-                  ),
-                  const Spacer(),
                   AppButton(
                     text: effectiveRemaining == Duration.zero
                         ? _isStarting
@@ -556,14 +666,222 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
       );
     });
   }
+
+  void _startConnectionQualityChecks() {
+    unawaited(_checkConnectionQuality());
+    _connectionQualityTimer?.cancel();
+    _connectionQualityTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_checkConnectionQuality()),
+    );
+  }
+
+  Future<void> _checkConnectionQuality() async {
+    if (_isCheckingConnectionQuality) return;
+    _isCheckingConnectionQuality = true;
+    if (mounted) setState(() {});
+
+    try {
+      final localBefore = DateTime.now();
+      final response = await Supabase.instance.client.rpc('server_now');
+      final localAfter = DateTime.now();
+      final serverNow = DateTime.tryParse(response.toString());
+      _lastServerLatency = localAfter.difference(localBefore);
+
+      if (serverNow != null) {
+        final localMidpoint = localBefore.add(
+          Duration(
+            microseconds:
+                localAfter.difference(localBefore).inMicroseconds ~/ 2,
+          ),
+        );
+        _recomputeConnectionQuality(
+          measuredOffset: serverNow.difference(localMidpoint),
+        );
+      } else {
+        _recomputeConnectionQuality();
+      }
+    } catch (error) {
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        _lastNetworkIssueAt = DateTime.now();
+      }
+      _recomputeConnectionQuality();
+    } finally {
+      _isCheckingConnectionQuality = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _recomputeConnectionQuality({Duration? measuredOffset}) {
+    final now = DateTime.now();
+    var score = 100;
+
+    final latencyMs = _lastServerLatency?.inMilliseconds;
+    if (latencyMs == null) {
+      score -= 12;
+    } else if (latencyMs > 2000) {
+      score -= 50;
+    } else if (latencyMs > 1000) {
+      score -= 35;
+    } else if (latencyMs > 500) {
+      score -= 18;
+    } else if (latencyMs > 250) {
+      score -= 8;
+    }
+
+    final offsetMs = measuredOffset?.inMilliseconds.abs();
+    if (offsetMs == null) {
+      score -= 5;
+    } else if (offsetMs > 3000) {
+      score -= 20;
+    } else if (offsetMs > 1500) {
+      score -= 12;
+    } else if (offsetMs > 500) {
+      score -= 5;
+    }
+
+    final realtimeAge = _lastRealtimeUpdateAt == null
+        ? null
+        : now.difference(_lastRealtimeUpdateAt!);
+    if (realtimeAge == null) {
+      score -= 8;
+    } else if (realtimeAge > const Duration(minutes: 2)) {
+      score -= 28;
+    } else if (realtimeAge > const Duration(minutes: 1)) {
+      score -= 18;
+    } else if (realtimeAge > const Duration(seconds: 20)) {
+      score -= 8;
+    }
+
+    final issueAge = _lastNetworkIssueAt == null
+        ? null
+        : now.difference(_lastNetworkIssueAt!);
+    if (issueAge != null && issueAge < const Duration(seconds: 30)) {
+      score -= 25;
+    } else if (issueAge != null && issueAge < const Duration(minutes: 2)) {
+      score -= 10;
+    }
+
+    if (!_hasJoinedWaitingRoom) score -= 5;
+
+    final nextQuality = score.clamp(5, 100).toInt();
+    if (!mounted) {
+      _connectionQuality = nextQuality;
+      return;
+    }
+    if (_connectionQuality != nextQuality) {
+      setState(() => _connectionQuality = nextQuality);
+    }
+  }
+
+  String _connectionQualityLabel(int percent) {
+    if (percent >= 90) return 'Excellente';
+    if (percent >= 75) return 'Bonne';
+    if (percent >= 55) return 'Moyenne';
+    return 'Instable';
+  }
+}
+
+class _ConnectionQualityCard extends StatelessWidget {
+  final int percent;
+  final String label;
+  final Duration? latency;
+  final bool isChecking;
+  final bool compact;
+
+  const _ConnectionQualityCard({
+    required this.percent,
+    required this.label,
+    required this.latency,
+    required this.isChecking,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = percent >= 75
+        ? AppColors.accentGreen
+        : percent >= 55
+        ? AppColors.gold
+        : AppColors.accentRed;
+    final latencyLabel = latency == null
+        ? 'mesure en cours'
+        : '${latency!.inMilliseconds} ms';
+
+    return AppCard(
+      padding: EdgeInsets.fromLTRB(14, compact ? 9 : 12, 14, compact ? 9 : 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.network_check_rounded, size: 18, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Qualité internet $percent% · $label',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.body.copyWith(
+                    fontSize: compact ? 12 : null,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (isChecking)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: color,
+                  ),
+                ),
+            ],
+          ),
+          SizedBox(height: compact ? 7 : 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: percent / 100,
+              minHeight: compact ? 6 : 7,
+              backgroundColor: AppColors.surfaceBorder,
+              color: color,
+            ),
+          ),
+          SizedBox(height: compact ? 5 : 7),
+          Text(
+            'Temps de réponse: $latencyLabel',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textSecondary,
+              fontSize: compact ? 10.5 : null,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String _formatDuration(Duration duration) {
-  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final days = duration.inDays;
+  final hours = duration.inHours.remainder(24);
+  final minutes = duration.inMinutes.remainder(60);
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
+
+  if (days > 0) {
+    return '${days}j ${hours}h ${minutes.toString().padLeft(2, '0')}min';
+  }
+  if (duration.inHours > 0) {
+    return '${duration.inHours}h ${minutes.toString().padLeft(2, '0')}min';
+  }
+
+  return '${minutes.toString().padLeft(2, '0')}:$seconds';
 }
 
 String _formatPrize(num value) {
-  return formatCurrencyAmount(value, zeroLabel: 'Gain surprise');
+  return formatCurrencyAmount(value, zeroLabel: 'Récompense surprise');
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app_update/services/app_update_service.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -83,11 +84,20 @@ Future<void> dismissInfoMessage(WidgetRef ref, String messageId) async {
   final user = supabase.auth.currentUser;
   if (user == null) return;
 
-  await supabase.from('mobile_info_message_dismissals').upsert({
-    'message_id': messageId,
-    'user_id': user.id,
-    'dismissed_at': DateTime.now().toIso8601String(),
-  });
+  try {
+    await supabase
+        .from('mobile_info_message_dismissals')
+        .upsert(
+          {
+            'message_id': messageId,
+            'user_id': user.id,
+            'dismissed_at': DateTime.now().toIso8601String(),
+          },
+          onConflict: 'message_id,user_id',
+        );
+  } on PostgrestException catch (error) {
+    if (error.code != '23505') rethrow;
+  }
   ref.invalidate(infoMessagesProvider);
 }
 

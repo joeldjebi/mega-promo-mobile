@@ -1,4 +1,7 @@
-String formatCurrencyAmount(num value, {String zeroLabel = 'Prix surprise'}) {
+String formatCurrencyAmount(
+  num value, {
+  String zeroLabel = 'Récompense surprise',
+}) {
   final rounded = value.round();
   if (rounded <= 0) return zeroLabel;
   return '${formatThousands(rounded)} FCFA';

@@ -275,7 +275,7 @@ class _EmptyNotifications extends StatelessWidget {
             Text('Aucune notification', style: AppTextStyles.h2),
             const SizedBox(height: 8),
             Text(
-              'Tes alertes de concours, gains et annonces apparaîtront ici.',
+              'Tes alertes de quiz, récompenses et annonces apparaîtront ici.',
               textAlign: TextAlign.center,
               style: AppTextStyles.bodySecondary,
             ),

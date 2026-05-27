@@ -104,7 +104,7 @@ class QuizScreen extends ConsumerWidget {
         backgroundColor: AppColors.background,
         body: _LiveQuizUnavailable(
           title: 'Quiz indisponible',
-          message: 'Impossible de vérifier l’état du concours pour le moment.',
+          message: 'Impossible de vérifier l’état du quiz pour le moment.',
           onBack: () => context.go('/home'),
         ),
       ),
@@ -172,7 +172,7 @@ class _QuizAccessDenied extends StatelessWidget {
             children: [
               const Icon(Icons.lock_rounded, color: AppColors.gold, size: 42),
               const SizedBox(height: 14),
-              Text('Concours réservé', style: AppTextStyles.h2),
+              Text('Quiz réservé', style: AppTextStyles.h2),
               const SizedBox(height: 8),
               Text(
                 'Ce quiz est accessible uniquement aux joueurs $label.',
@@ -180,7 +180,7 @@ class _QuizAccessDenied extends StatelessWidget {
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 20),
-              AppButton(text: 'Retour au concours', onPressed: onBack),
+              AppButton(text: 'Retour au quiz', onPressed: onBack),
             ],
           ),
         ),
@@ -217,7 +217,7 @@ class _QuizAlreadyStarted extends StatelessWidget {
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 20),
-              AppButton(text: 'Retour au concours', onPressed: onBack),
+              AppButton(text: 'Retour au quiz', onPressed: onBack),
             ],
           ),
         ),
@@ -910,7 +910,7 @@ class _EmptyQuiz extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Aucune question disponible pour ce concours.',
+            'Aucune question disponible pour ce quiz.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary,
           ),

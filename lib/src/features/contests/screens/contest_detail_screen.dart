@@ -355,7 +355,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
     if (data.hasParticipated) return 'Déjà joué · Voir détails';
     if (_dailyLimitReached) {
-      return 'Débloquer mon profil';
+      return 'Voir les options';
     }
     return 'Participer';
   }
@@ -409,7 +409,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Ce concours est réservé aux joueurs ${data.contest.accessLabel}.',
+            'Ce quiz est réservé aux joueurs ${data.contest.accessLabel}.',
           ),
         ),
       );
@@ -559,7 +559,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Participation déjà enregistrée pour ce concours.'),
+            content: Text('Participation déjà enregistrée pour ce quiz.'),
           ),
         );
         _refreshParticipationState(ref);
@@ -655,21 +655,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  Row(
-                    children: [
-                      _TypeBadge(type: contest.type),
-                      if (contest.allowedPlayerPlanKeys.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        _AccessBadge(label: contest.accessLabel),
-                      ],
-                      if (contest.brandLogoUrl?.isNotEmpty == true) ...[
-                        const Spacer(),
-                        Flexible(
-                          child: _ContestBrandLogoLine(contest: contest),
-                        ),
-                      ],
-                    ],
-                  ),
+                  _ContestDetailMetaRow(contest: contest),
                   const SizedBox(height: 16),
                   Text(contest.title, style: AppTextStyles.h1),
                   const SizedBox(height: 10),
@@ -696,7 +682,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                         Expanded(
                           child: _DetailStat(
                             icon: Icons.workspace_premium_rounded,
-                            label: 'Gagnants',
+                            label: 'Lauréats',
                             value: '${contest.winnersCount}',
                           ),
                         ),
@@ -764,7 +750,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Ce concours est réservé aux joueurs ${contest.accessLabel}. Ton forfait actuel est ${data.userProfile.planName}.',
+                              'Ce quiz est réservé aux joueurs ${contest.accessLabel}. Ton forfait actuel est ${data.userProfile.planName}.',
                               style: AppTextStyles.bodySecondary,
                             ),
                           ),
@@ -798,7 +784,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Tu as utilisé ${data.userProfile.participationsToday}/${data.userProfile.dailyParticipationLimit} participations aujourd’hui. Débloque ton profil pour continuer à jouer.',
+                                  'Tu as utilisé ${data.userProfile.participationsToday}/${data.userProfile.dailyParticipationLimit} participations aujourd’hui. Consulte les options disponibles pour continuer.',
                                   style: AppTextStyles.bodySecondary,
                                 ),
                               ],
@@ -832,7 +818,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Ta participation est enregistrée pour ce concours.',
+                                  'Ta participation est enregistrée pour ce quiz.',
                                   style: AppTextStyles.bodySecondary,
                                 ),
                               ],
@@ -860,13 +846,13 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                     ),
                   ),
                   const SizedBox(height: 22),
-                  Text('Le prix', style: AppTextStyles.h2),
+                  Text('La récompense', style: AppTextStyles.h2),
                   const SizedBox(height: 10),
                   AppCard(
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       contest.prizeDescription.isEmpty
-                          ? 'Prix surprise offert par la marque partenaire.'
+                          ? 'Récompense surprise offerte par la marque partenaire.'
                           : contest.prizeDescription,
                       style: AppTextStyles.body,
                     ),
@@ -980,7 +966,7 @@ class _EndedLiveQuizDetail extends StatelessWidget {
               child: Column(
                 children: [
                   Text(
-                    'Ce Quiz Live n’est plus accessible. Retourne à l’accueil pour voir les concours disponibles.',
+                    'Ce Quiz Live n’est plus accessible. Retourne à l’accueil pour voir les quiz disponibles.',
                     textAlign: TextAlign.center,
                     style: AppTextStyles.bodySecondary,
                   ),
@@ -998,7 +984,7 @@ class _EndedLiveQuizDetail extends StatelessWidget {
                       Expanded(
                         child: _DetailStat(
                           icon: Icons.workspace_premium_rounded,
-                          label: 'Prix',
+                          label: 'Récompense',
                           value: _formatPrize(contest.prizeValue),
                         ),
                       ),
@@ -1275,7 +1261,7 @@ class _DrawParticipationSheetState
     final tickets = _drawTickets(widget.data);
     final confirmationMessage =
         widget.data.drawSettings?.confirmationMessage ??
-        'Les gagnants seront annoncés ${_shortDateTime(widget.data.contest.computedLiveEndsAt)}.';
+        'Les lauréats seront annoncés ${_shortDateTime(widget.data.contest.computedLiveEndsAt)}.';
     final winnerDate =
         widget.data.drawSettings?.winnerAnnouncementAt ??
         widget.data.contest.computedLiveEndsAt;
@@ -1304,7 +1290,7 @@ class _DrawParticipationSheetState
             ),
             const SizedBox(height: 18),
             Text(
-              _isDone ? 'Tu participes !' : 'Participer au tirage',
+              _isDone ? 'Participation validée !' : 'Valider ma participation',
               style: AppTextStyles.h2,
             ),
             const SizedBox(height: 10),
@@ -1327,7 +1313,9 @@ class _DrawParticipationSheetState
             const SizedBox(height: 18),
             AppCard(
               child: Text(
-                'Tu auras $tickets ticket${tickets > 1 ? 's' : ''}',
+                tickets > 1
+                    ? 'Ta participation est enregistrée avec $tickets participations bonus.'
+                    : 'Ta participation est enregistrée.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.h3,
               ),
@@ -1423,7 +1411,7 @@ class _PredictionParticipationSheetState
     if (prediction == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Ce pronostic n’est pas encore configuré.'),
+          content: Text('Ce quiz sport n’est pas encore configuré.'),
         ),
       );
       return;
@@ -1432,7 +1420,7 @@ class _PredictionParticipationSheetState
     if (!prediction.isOpen) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Ce pronostic est fermé.')));
+      ).showSnackBar(const SnackBar(content: Text('Ce quiz sport est fermé.')));
       return;
     }
 
@@ -1501,7 +1489,7 @@ class _PredictionParticipationSheetState
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pronostic impossible. Réessaie.')),
+        const SnackBar(content: Text('Réponse impossible. Réessaie.')),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -1563,11 +1551,11 @@ class _PredictionParticipationSheetState
       case FootballPredictionKind.customText:
         final text = _customTextController.text.trim();
         if (text.length < 2) {
-          _showValidationMessage('Entre ton pronostic.');
+          _showValidationMessage('Entre ta réponse.');
           return null;
         }
         return _PredictionAnswer(
-          summary: 'Ton pronostic: $text',
+          summary: 'Ta réponse: $text',
           answers: {'prediction_text': text},
         );
     }
@@ -1660,7 +1648,7 @@ class _PredictionParticipationSheetState
               ),
               const SizedBox(height: 16),
               Text(
-                _isDone ? 'Pronostic enregistré !' : 'Ton pronostic',
+                _isDone ? 'Réponse enregistrée !' : 'Ta réponse',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.h2,
               ),
@@ -1713,14 +1701,14 @@ class _PredictionParticipationSheetState
                   isConfigured
                       ? isOpen
                             ? _predictionHelpText(prediction!)
-                            : 'Ce pronostic est actuellement fermé.'
+                            : 'Ce quiz sport est actuellement fermé.'
                       : 'Ce jeu n’est pas encore configuré par MegaPromo.',
                   textAlign: TextAlign.center,
                   style: AppTextStyles.bodySmall,
                 ),
                 const SizedBox(height: 18),
                 AppButton(
-                  text: prediction?.actionLabel ?? 'Valider mon pronostic',
+                  text: prediction?.actionLabel ?? 'Valider ma réponse',
                   isLoading: _isSaving,
                   onPressed: isConfigured && isOpen && !_isSaving
                       ? _confirm
@@ -1729,7 +1717,7 @@ class _PredictionParticipationSheetState
               ] else ...[
                 Text(
                   _doneSummary.isEmpty
-                      ? 'Ton pronostic est enregistre.'
+                      ? 'Ta réponse est enregistrée.'
                       : _doneSummary,
                   textAlign: TextAlign.center,
                   style: AppTextStyles.body,
@@ -1800,11 +1788,11 @@ class _PredictionParticipationSheetState
   String _predictionHelpText(ContestPrediction prediction) {
     return switch (prediction.kind) {
       FootballPredictionKind.scoreExact =>
-        'Score exact : ${prediction.pointsExactScore} pts · Bon resultat : ${prediction.pointsCorrectResult} pts',
+        'Bonne réponse : ${prediction.pointsExactScore} pts · Réponse partielle : ${prediction.pointsCorrectResult} pts',
       FootballPredictionKind.firstScorer =>
-        'Choisis le premier buteur. Tu peux choisir "Aucun but" si disponible.',
+        'Choisis la réponse proposée par la marque. Tu peux choisir "Aucun" si disponible.',
       FootballPredictionKind.assistProvider =>
-        'Choisis le passeur decisif. Tu peux choisir "Aucune passe" si disponible.',
+        'Choisis la réponse proposée par la marque. Tu peux choisir "Aucune" si disponible.',
       FootballPredictionKind.startingEleven =>
         'Selectionne ${prediction.maxSelections} joueurs (${_selectedPlayers.length}/${prediction.maxSelections}).',
       FootballPredictionKind.customText => prediction.prompt,
@@ -2161,10 +2149,55 @@ class _HeroActionButton extends StatelessWidget {
   }
 }
 
-class _ContestBrandLogoLine extends StatelessWidget {
+class _ContestDetailMetaRow extends StatelessWidget {
   final Contest contest;
 
-  const _ContestBrandLogoLine({required this.contest});
+  const _ContestDetailMetaRow({required this.contest});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBrand = contest.brandLogoUrl?.isNotEmpty == true;
+    final badges = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _TypeBadge(type: contest.type),
+        if (contest.allowedPlayerPlanKeys.isNotEmpty)
+          _AccessBadge(label: contest.accessLabel),
+      ],
+    );
+
+    if (!hasBrand) return badges;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Flexible(
+          flex: 4,
+          child: Align(alignment: Alignment.centerLeft, child: badges),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          flex: 6,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: _ContestBrandLogoLine(contest: contest, fillWidth: true),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ContestBrandLogoLine extends StatelessWidget {
+  final Contest contest;
+  final bool fillWidth;
+
+  const _ContestBrandLogoLine({
+    required this.contest,
+    this.fillWidth = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2172,7 +2205,7 @@ class _ContestBrandLogoLine extends StatelessWidget {
     if (logoUrl == null || logoUrl.isEmpty) return const SizedBox.shrink();
 
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: fillWidth ? MainAxisSize.max : MainAxisSize.min,
       children: [
         _BrandLogoImage(url: logoUrl, size: 38),
         if (contest.brandName?.trim().isNotEmpty == true) ...[
@@ -2184,6 +2217,7 @@ class _ContestBrandLogoLine extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: AppTextStyles.bodySmall.copyWith(
                 fontWeight: FontWeight.w700,
+                height: 1.15,
                 color: AppColors.textSecondary,
               ),
             ),
@@ -2406,7 +2440,7 @@ class _ContestDetailError extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Impossible de charger ce concours.',
+                  'Impossible de charger ce quiz.',
                   textAlign: TextAlign.center,
                   style: AppTextStyles.bodySecondary,
                 ),
@@ -2466,14 +2500,14 @@ String _shortDateTime(DateTime date) {
 
 String _winnerText(Contest contest) {
   return contest.winnersCount > 1
-      ? '${contest.winnersCount} vainqueurs'
-      : '1 vainqueur';
+      ? '${contest.winnersCount} lauréats'
+      : '1 lauréat';
 }
 
 String _winnerDesignationText(Contest contest) {
   return contest.winnersCount > 1
-      ? '${contest.winnersCount} vainqueurs désignés'
-      : '1 vainqueur désigné';
+      ? '${contest.winnersCount} lauréats désignés'
+      : '1 lauréat désigné';
 }
 
 String _liveQuizInfoText(Contest contest) {
