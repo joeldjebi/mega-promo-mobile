@@ -17,6 +17,17 @@ class NotificationsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Retour',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+              return;
+            }
+            context.go('/home');
+          },
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         title: const Text('Notifications'),
         actions: [
           notifications.maybeWhen(

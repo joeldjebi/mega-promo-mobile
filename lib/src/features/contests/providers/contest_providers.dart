@@ -98,10 +98,14 @@ List<Contest> _sortContests(List<Contest> contests) {
 
 Future<void> _processLiveQuizEvents(dynamic supabase) async {
   try {
-    await supabase.rpc('process_live_quiz_events');
+    await supabase.rpc('process_contest_events');
   } catch (_) {
-    // The stream can still render with the current rows if the maintenance RPC
-    // has not been deployed yet.
+    try {
+      await supabase.rpc('process_live_quiz_events');
+    } catch (_) {
+      // The stream can still render with the current rows if the maintenance
+      // RPC has not been deployed yet.
+    }
   }
 }
 
@@ -228,6 +232,7 @@ class ContestUserRanking {
 }
 
 class ContestPrediction {
+  final String predictionType;
   final String homeTeam;
   final String awayTeam;
   final String matchLabel;
@@ -237,8 +242,11 @@ class ContestPrediction {
   final String status;
   final int pointsExactScore;
   final int pointsCorrectResult;
+  final Map<String, dynamic> options;
+  final Map<String, dynamic> metadata;
 
   const ContestPrediction({
+    required this.predictionType,
     required this.homeTeam,
     required this.awayTeam,
     required this.matchLabel,
@@ -248,10 +256,18 @@ class ContestPrediction {
     required this.status,
     required this.pointsExactScore,
     required this.pointsCorrectResult,
+    required this.options,
+    required this.metadata,
   });
 
   factory ContestPrediction.fromJson(Map<String, dynamic> json) {
+    final options = _jsonMap(json['options']);
+    final metadata = _jsonMap(json['metadata']);
     return ContestPrediction(
+      predictionType:
+          json['prediction_type'] as String? ??
+          metadata['theme'] as String? ??
+          'score_exact',
       homeTeam: json['home_team'] as String? ?? 'Equipe 1',
       awayTeam: json['away_team'] as String? ?? 'Equipe 2',
       matchLabel: json['match_label'] as String? ?? 'Pronostic du match',
@@ -262,10 +278,128 @@ class ContestPrediction {
       pointsExactScore: (json['points_exact_score'] as num?)?.toInt() ?? 50,
       pointsCorrectResult:
           (json['points_correct_result'] as num?)?.toInt() ?? 20,
+      options: options,
+      metadata: metadata,
     );
   }
 
   bool get isOpen => status == 'open';
+
+  FootballPredictionKind get kind =>
+      FootballPredictionKind.fromKey(predictionType);
+
+  String get prompt =>
+      options['prompt'] as String? ??
+      metadata['hint'] as String? ??
+      kind.defaultPrompt;
+
+  String get actionLabel =>
+      options['action_label'] as String? ?? kind.defaultActionLabel;
+
+  List<String> get players {
+    final configured = _stringList(options['players']);
+    if (configured.isNotEmpty) return configured;
+    return kind.defaultPlayers;
+  }
+
+  bool get allowNone => options['allow_none'] as bool? ?? false;
+
+  bool get allowOther => options['allow_other'] as bool? ?? true;
+
+  int get minSelections =>
+      (options['min_selections'] as num?)?.toInt() ?? kind.defaultMinSelections;
+
+  int get maxSelections =>
+      (options['max_selections'] as num?)?.toInt() ?? kind.defaultMaxSelections;
+}
+
+enum FootballPredictionKind {
+  scoreExact,
+  firstScorer,
+  assistProvider,
+  startingEleven,
+  customText;
+
+  factory FootballPredictionKind.fromKey(String value) {
+    final normalized = value.trim().toLowerCase();
+    return switch (normalized) {
+      'score_exact' || 'exact_score' || 'score' => scoreExact,
+      'first_scorer' || 'first_goal' || 'first_goal_scorer' => firstScorer,
+      'assist_provider' || 'first_assist' || 'passeur' => assistProvider,
+      'starting_eleven' || 'starting_lineup' || 'lineup' => startingEleven,
+      'custom_text' || 'free_text' || 'text' => customText,
+      _ => scoreExact,
+    };
+  }
+
+  String get storageKey {
+    return switch (this) {
+      scoreExact => 'score_exact',
+      firstScorer => 'first_scorer',
+      assistProvider => 'assist_provider',
+      startingEleven => 'starting_eleven',
+      customText => 'custom_text',
+    };
+  }
+
+  String get defaultPrompt {
+    return switch (this) {
+      scoreExact => 'Quel sera le score final ?',
+      firstScorer => 'Qui marquera le premier but ?',
+      assistProvider => 'Qui fera la premiere passe decisive ?',
+      startingEleven => 'Selectionne les 11 joueurs titulaires.',
+      customText => 'Entre ton pronostic.',
+    };
+  }
+
+  String get defaultActionLabel {
+    return switch (this) {
+      scoreExact => 'Valider mon score',
+      firstScorer => 'Valider mon buteur',
+      assistProvider => 'Valider mon passeur',
+      startingEleven => 'Valider mon XI',
+      customText => 'Valider mon pronostic',
+    };
+  }
+
+  int get defaultMinSelections => this == startingEleven ? 11 : 1;
+
+  int get defaultMaxSelections => this == startingEleven ? 11 : 1;
+
+  List<String> get defaultPlayers => const [
+    'Yahia Fofana',
+    'Serge Aurier',
+    'Wilfried Singo',
+    'Evan Ndicka',
+    'Ghislain Konan',
+    'Seko Fofana',
+    'Franck Kessie',
+    'Ibrahim Sangare',
+    'Simon Adingra',
+    'Nicolas Pepe',
+    'Sebastien Haller',
+    'Oumar Diakite',
+    'Karim Konate',
+    'Jean-Philippe Krasso',
+    'Max-Alain Gradel',
+    'Jeremie Boga',
+    'Odilon Kossounou',
+    'Willy Boly',
+  ];
+}
+
+Map<String, dynamic> _jsonMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return value.cast<String, dynamic>();
+  return <String, dynamic>{};
+}
+
+List<String> _stringList(dynamic value) {
+  if (value is! List) return const <String>[];
+  return value
+      .map((item) => item?.toString().trim() ?? '')
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
 }
 
 class ContestDrawSettings {

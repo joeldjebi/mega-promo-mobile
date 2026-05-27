@@ -1,3 +1,4 @@
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,9 +9,7 @@ const _shareBaseUrl = 'https://megapromo.app';
 String contestShareUrl(String contestId) => '$_shareBaseUrl/c/$contestId';
 
 String formatPrizeValue(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Prix surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value);
 }
 
 String formatRemainingText(DateTime endsAt) {
@@ -39,7 +38,7 @@ Future<void> shareContest({
 
   final text =
       '''*${contest.title}*
-Gagne *${contest.prizeValue.round()} FCFA* sur MegaPromo !
+Gagne *${formatCurrencyAmount(contest.prizeValue)}* sur MegaPromo !
 
 Il reste ${formatRemainingText(contest.endsAt)}
 $participantsCount joueurs participent déjà

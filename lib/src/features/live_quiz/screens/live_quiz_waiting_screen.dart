@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -564,7 +565,5 @@ String _formatDuration(Duration duration) {
 }
 
 String _formatPrize(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Gain surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value, zeroLabel: 'Gain surprise');
 }

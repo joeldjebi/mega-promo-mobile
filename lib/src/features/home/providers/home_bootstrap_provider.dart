@@ -100,10 +100,14 @@ Future<HomeBootstrapData> _fetchHomeBootstrap(Ref ref, String userId) async {
   final supabase = ref.watch(supabaseProvider);
   authLogPayload('homeBootstrap', {'userId': userId});
   try {
-    await supabase.rpc('process_live_quiz_events');
+    await supabase.rpc('process_contest_events');
   } catch (_) {
-    // The bootstrap RPC still filters expired live quizzes client-side if the
-    // maintenance RPC has not been deployed yet.
+    try {
+      await supabase.rpc('process_live_quiz_events');
+    } catch (_) {
+      // The bootstrap RPC still filters expired live quizzes client-side if the
+      // maintenance RPC has not been deployed yet.
+    }
   }
 
   Object response;
@@ -179,10 +183,14 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   authLogPayload('homeBootstrapFallback', {'userId': userId});
 
   try {
-    await supabase.rpc('process_live_quiz_events');
+    await supabase.rpc('process_contest_events');
   } catch (_) {
-    // The fallback must keep the Home usable even before maintenance RPCs are
-    // deployed.
+    try {
+      await supabase.rpc('process_live_quiz_events');
+    } catch (_) {
+      // The fallback must keep the Home usable even before maintenance RPCs are
+      // deployed.
+    }
   }
 
   final profileFuture = fetchCurrentUserProfile(ref, userId: userId);

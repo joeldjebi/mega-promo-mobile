@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -304,6 +305,7 @@ class _ContestDetailBody extends ConsumerStatefulWidget {
 
 class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   bool _isActionRunning = false;
+  bool _isSubscriptionNavigationRunning = false;
 
   ContestDetailData get data => widget.data;
 
@@ -351,7 +353,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       if (_canStartLiveQuiz) return 'Démarrer le Quiz Live';
       return 'Place réservée';
     }
-    if (data.hasParticipated) return 'Déjà participé · Actualiser';
+    if (data.hasParticipated) return 'Déjà joué · Voir détails';
     if (_dailyLimitReached) {
       return 'Débloquer mon profil';
     }
@@ -383,6 +385,16 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         const SnackBar(content: Text('Impossible d’ouvrir le partage.')),
       );
     }
+  }
+
+  void _openSubscriptions(BuildContext context) {
+    if (_isSubscriptionNavigationRunning) return;
+    _isSubscriptionNavigationRunning = true;
+    final contestId = data.contest.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+      context.go('/subscriptions?fromContest=$contestId');
+    });
   }
 
   Future<void> _participate(BuildContext context) async {
@@ -874,12 +886,18 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             child: AppButton(
               text: _buttonText,
               isLoading: _isActionRunning,
+              color: data.hasParticipated && !contest.isLive
+                  ? AppColors.surfaceBorder
+                  : null,
+              foregroundColor: data.hasParticipated && !contest.isLive
+                  ? AppColors.textSecondary
+                  : null,
               onPressed: _isActionDisabled || _isActionRunning
                   ? null
                   : data.hasParticipated
                   ? () => _refreshParticipationState(ref)
                   : (!contest.isLive && _dailyLimitReached)
-                  ? () => context.push('/subscriptions')
+                  ? () => _openSubscriptions(context)
                   : () => _participate(context),
             ),
           ),
@@ -1382,6 +1400,11 @@ class _PredictionParticipationSheetState
     extends ConsumerState<_PredictionParticipationSheet> {
   final _homeScoreController = TextEditingController();
   final _awayScoreController = TextEditingController();
+  final _otherPlayerController = TextEditingController();
+  final _customTextController = TextEditingController();
+  final Set<String> _selectedPlayers = <String>{};
+  String? _selectedPlayer;
+  String _doneSummary = '';
   bool _isSaving = false;
   bool _isDone = false;
 
@@ -1389,13 +1412,13 @@ class _PredictionParticipationSheetState
   void dispose() {
     _homeScoreController.dispose();
     _awayScoreController.dispose();
+    _otherPlayerController.dispose();
+    _customTextController.dispose();
     super.dispose();
   }
 
   Future<void> _confirm() async {
     final prediction = widget.data.prediction;
-    final homeScore = int.tryParse(_homeScoreController.text.trim());
-    final awayScore = int.tryParse(_awayScoreController.text.trim());
 
     if (prediction == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1413,13 +1436,8 @@ class _PredictionParticipationSheetState
       return;
     }
 
-    if (homeScore == null ||
-        awayScore == null ||
-        homeScore < 0 ||
-        awayScore < 0) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Entre un score valide.')));
+    final predictionAnswer = _buildPredictionAnswer(prediction);
+    if (predictionAnswer == null) {
       return;
     }
 
@@ -1435,12 +1453,11 @@ class _PredictionParticipationSheetState
         'score': 0,
         'answers': {
           'type': 'pronostic',
+          'prediction_type': prediction.kind.storageKey,
           'match': prediction.matchLabel,
           'home_team': prediction.homeTeam,
           'away_team': prediction.awayTeam,
-          'predicted_home_score': homeScore,
-          'predicted_away_score': awayScore,
-          'predicted_score': '$homeScore-$awayScore',
+          ...predictionAnswer.answers,
         },
         'completed': true,
       });
@@ -1475,7 +1492,12 @@ class _PredictionParticipationSheetState
       clearContestDetailCache(widget.data.contest.id);
       widget.ref.invalidate(contestDetailProvider(widget.data.contest.id));
 
-      if (mounted) setState(() => _isDone = true);
+      if (mounted) {
+        setState(() {
+          _doneSummary = predictionAnswer.summary;
+          _isDone = true;
+        });
+      }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1486,6 +1508,112 @@ class _PredictionParticipationSheetState
     }
   }
 
+  _PredictionAnswer? _buildPredictionAnswer(ContestPrediction prediction) {
+    switch (prediction.kind) {
+      case FootballPredictionKind.scoreExact:
+        final homeScore = int.tryParse(_homeScoreController.text.trim());
+        final awayScore = int.tryParse(_awayScoreController.text.trim());
+        if (homeScore == null ||
+            awayScore == null ||
+            homeScore < 0 ||
+            awayScore < 0) {
+          _showValidationMessage('Entre un score valide.');
+          return null;
+        }
+        return _PredictionAnswer(
+          summary:
+              'Tu as joué ${prediction.homeTeam} $homeScore-$awayScore ${prediction.awayTeam}.',
+          answers: {
+            'predicted_home_score': homeScore,
+            'predicted_away_score': awayScore,
+            'predicted_score': '$homeScore-$awayScore',
+          },
+        );
+      case FootballPredictionKind.firstScorer:
+      case FootballPredictionKind.assistProvider:
+        final player = _selectedSinglePlayer(prediction);
+        if (player == null) return null;
+        final answerKey = prediction.kind == FootballPredictionKind.firstScorer
+            ? 'predicted_first_scorer'
+            : 'predicted_assist_provider';
+        return _PredictionAnswer(
+          summary: '${prediction.prompt} $player',
+          answers: {
+            answerKey: player,
+            'selected_player': player,
+          },
+        );
+      case FootballPredictionKind.startingEleven:
+        final requiredCount = prediction.maxSelections;
+        if (_selectedPlayers.length < prediction.minSelections ||
+            _selectedPlayers.length > requiredCount) {
+          _showValidationMessage(
+            'Selectionne ${prediction.maxSelections} joueurs pour valider ton XI.',
+          );
+          return null;
+        }
+        final players = _selectedPlayers.toList(growable: false);
+        return _PredictionAnswer(
+          summary: 'Ton XI titulaire est enregistre (${players.length}/$requiredCount).',
+          answers: {
+            'predicted_starting_eleven': players,
+            'selected_players': players,
+          },
+        );
+      case FootballPredictionKind.customText:
+        final text = _customTextController.text.trim();
+        if (text.length < 2) {
+          _showValidationMessage('Entre ton pronostic.');
+          return null;
+        }
+        return _PredictionAnswer(
+          summary: 'Ton pronostic: $text',
+          answers: {'prediction_text': text},
+        );
+    }
+  }
+
+  String? _selectedSinglePlayer(ContestPrediction prediction) {
+    final selected = _selectedPlayer;
+    if (selected == null || selected.isEmpty) {
+      _showValidationMessage('Choisis un joueur pour valider.');
+      return null;
+    }
+    if (selected == '__none__') {
+      return prediction.kind == FootballPredictionKind.firstScorer
+          ? 'Aucun but'
+          : 'Aucune passe decisive';
+    }
+    if (selected == '__other__') {
+      final other = _otherPlayerController.text.trim();
+      if (other.length < 2) {
+        _showValidationMessage('Entre le nom du joueur.');
+        return null;
+      }
+      return other;
+    }
+    return selected;
+  }
+
+  void _showValidationMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _togglePlayer(String player, ContestPrediction prediction) {
+    setState(() {
+      if (_selectedPlayers.contains(player)) {
+        _selectedPlayers.remove(player);
+        return;
+      }
+      if (_selectedPlayers.length >= prediction.maxSelections) {
+        return;
+      }
+      _selectedPlayers.add(player);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final prediction = widget.data.prediction;
@@ -1493,6 +1621,11 @@ class _PredictionParticipationSheetState
     final awayTeam = prediction?.awayTeam ?? 'Equipe 2';
     final isConfigured = prediction != null;
     final isOpen = prediction?.isOpen ?? false;
+    final icon = prediction?.kind == FootballPredictionKind.startingEleven
+        ? Icons.groups_rounded
+        : prediction?.kind == FootballPredictionKind.scoreExact
+        ? Icons.scoreboard_rounded
+        : Icons.sports_soccer_rounded;
 
     return SafeArea(
       child: Padding(
@@ -1520,7 +1653,7 @@ class _PredictionParticipationSheetState
                   border: Border.all(color: AppColors.surfaceBorder),
                 ),
                 child: Icon(
-                  _isDone ? Icons.check_rounded : Icons.sports_soccer_rounded,
+                  _isDone ? Icons.check_rounded : icon,
                   color: _isDone ? AppColors.accentGreen : AppColors.primary,
                   size: 34,
                 ),
@@ -1573,34 +1706,13 @@ class _PredictionParticipationSheetState
               ),
               const SizedBox(height: 14),
               if (!_isDone) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _homeScoreController,
-                        enabled: isConfigured && isOpen,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: InputDecoration(labelText: homeTeam),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: _awayScoreController,
-                        enabled: isConfigured && isOpen,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: InputDecoration(labelText: awayTeam),
-                      ),
-                    ),
-                  ],
-                ),
+                if (prediction != null)
+                  _buildPredictionForm(prediction, isConfigured && isOpen),
                 const SizedBox(height: 12),
                 Text(
                   isConfigured
                       ? isOpen
-                            ? 'Score exact : ${prediction.pointsExactScore} pts · Bon résultat : ${prediction.pointsCorrectResult} pts'
+                            ? _predictionHelpText(prediction!)
                             : 'Ce pronostic est actuellement fermé.'
                       : 'Ce jeu n’est pas encore configuré par MegaPromo.',
                   textAlign: TextAlign.center,
@@ -1608,7 +1720,7 @@ class _PredictionParticipationSheetState
                 ),
                 const SizedBox(height: 18),
                 AppButton(
-                  text: 'Valider mon pronostic',
+                  text: prediction?.actionLabel ?? 'Valider mon pronostic',
                   isLoading: _isSaving,
                   onPressed: isConfigured && isOpen && !_isSaving
                       ? _confirm
@@ -1616,7 +1728,9 @@ class _PredictionParticipationSheetState
                 ),
               ] else ...[
                 Text(
-                  'Tu as joué $homeTeam ${_homeScoreController.text}-${_awayScoreController.text} $awayTeam.',
+                  _doneSummary.isEmpty
+                      ? 'Ton pronostic est enregistre.'
+                      : _doneSummary,
                   textAlign: TextAlign.center,
                   style: AppTextStyles.body,
                 ),
@@ -1624,6 +1738,241 @@ class _PredictionParticipationSheetState
                 AppButton(text: 'Fermer', onPressed: () => context.pop()),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPredictionForm(ContestPrediction prediction, bool enabled) {
+    switch (prediction.kind) {
+      case FootballPredictionKind.scoreExact:
+        return Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _homeScoreController,
+                enabled: enabled,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(labelText: prediction.homeTeam),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _awayScoreController,
+                enabled: enabled,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(labelText: prediction.awayTeam),
+              ),
+            ),
+          ],
+        );
+      case FootballPredictionKind.firstScorer:
+      case FootballPredictionKind.assistProvider:
+        return _SinglePlayerPredictionForm(
+          prediction: prediction,
+          enabled: enabled,
+          selectedPlayer: _selectedPlayer,
+          otherController: _otherPlayerController,
+          onSelected: (value) => setState(() => _selectedPlayer = value),
+        );
+      case FootballPredictionKind.startingEleven:
+        return _StartingElevenPredictionForm(
+          prediction: prediction,
+          enabled: enabled,
+          selectedPlayers: _selectedPlayers,
+          onTogglePlayer: _togglePlayer,
+        );
+      case FootballPredictionKind.customText:
+        return TextField(
+          controller: _customTextController,
+          enabled: enabled,
+          minLines: 2,
+          maxLines: 4,
+          decoration: InputDecoration(labelText: prediction.prompt),
+        );
+    }
+  }
+
+  String _predictionHelpText(ContestPrediction prediction) {
+    return switch (prediction.kind) {
+      FootballPredictionKind.scoreExact =>
+        'Score exact : ${prediction.pointsExactScore} pts · Bon resultat : ${prediction.pointsCorrectResult} pts',
+      FootballPredictionKind.firstScorer =>
+        'Choisis le premier buteur. Tu peux choisir "Aucun but" si disponible.',
+      FootballPredictionKind.assistProvider =>
+        'Choisis le passeur decisif. Tu peux choisir "Aucune passe" si disponible.',
+      FootballPredictionKind.startingEleven =>
+        'Selectionne ${prediction.maxSelections} joueurs (${_selectedPlayers.length}/${prediction.maxSelections}).',
+      FootballPredictionKind.customText => prediction.prompt,
+    };
+  }
+}
+
+class _PredictionAnswer {
+  final String summary;
+  final Map<String, dynamic> answers;
+
+  const _PredictionAnswer({required this.summary, required this.answers});
+}
+
+class _SinglePlayerPredictionForm extends StatelessWidget {
+  final ContestPrediction prediction;
+  final bool enabled;
+  final String? selectedPlayer;
+  final TextEditingController otherController;
+  final ValueChanged<String> onSelected;
+
+  const _SinglePlayerPredictionForm({
+    required this.prediction,
+    required this.enabled,
+    required this.selectedPlayer,
+    required this.otherController,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final players = prediction.players;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(prediction.prompt, style: AppTextStyles.h3),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (prediction.allowNone)
+              _PredictionChoiceChip(
+                label: prediction.kind == FootballPredictionKind.firstScorer
+                    ? 'Aucun but'
+                    : 'Aucune passe',
+                selected: selectedPlayer == '__none__',
+                enabled: enabled,
+                onTap: () => onSelected('__none__'),
+              ),
+            ...players.map(
+              (player) => _PredictionChoiceChip(
+                label: player,
+                selected: selectedPlayer == player,
+                enabled: enabled,
+                onTap: () => onSelected(player),
+              ),
+            ),
+            if (prediction.allowOther)
+              _PredictionChoiceChip(
+                label: 'Autre joueur',
+                selected: selectedPlayer == '__other__',
+                enabled: enabled,
+                onTap: () => onSelected('__other__'),
+              ),
+          ],
+        ),
+        if (selectedPlayer == '__other__') ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: otherController,
+            enabled: enabled,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Nom du joueur'),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StartingElevenPredictionForm extends StatelessWidget {
+  final ContestPrediction prediction;
+  final bool enabled;
+  final Set<String> selectedPlayers;
+  final void Function(String player, ContestPrediction prediction) onTogglePlayer;
+
+  const _StartingElevenPredictionForm({
+    required this.prediction,
+    required this.enabled,
+    required this.selectedPlayers,
+    required this.onTogglePlayer,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text(prediction.prompt, style: AppTextStyles.h3)),
+            const SizedBox(width: 12),
+            Text(
+              '${selectedPlayers.length}/${prediction.maxSelections}',
+              style: AppTextStyles.label.copyWith(color: AppColors.primary),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: prediction.players.map((player) {
+            return _PredictionChoiceChip(
+              label: player,
+              selected: selectedPlayers.contains(player),
+              enabled:
+                  enabled &&
+                  (selectedPlayers.contains(player) ||
+                      selectedPlayers.length < prediction.maxSelections),
+              onTap: () => onTogglePlayer(player, prediction),
+            );
+          }).toList(growable: false),
+        ),
+      ],
+    );
+  }
+}
+
+class _PredictionChoiceChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _PredictionChoiceChip({
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.primary : AppColors.surfaceElevated;
+    final textColor = selected ? Colors.white : AppColors.textSecondary;
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: enabled ? color : AppColors.surfaceBorder,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? AppColors.primaryDark : AppColors.surfaceBorder,
+          ),
+        ),
+        child: Text(
+          label,
+          style: AppTextStyles.bodySmall.copyWith(
+            color: enabled ? textColor : AppColors.textHint,
+            fontWeight: FontWeight.w800,
           ),
         ),
       ),
@@ -2100,9 +2449,7 @@ class _ShimmerBox extends StatelessWidget {
 }
 
 String _formatPrize(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Prix surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value);
 }
 
 String _shortDate(DateTime date) {

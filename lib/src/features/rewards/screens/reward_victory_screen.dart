@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:shimmer/shimmer.dart';
@@ -32,12 +35,19 @@ class _RewardVictoryScreenState extends ConsumerState<RewardVictoryScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2600),
     )..repeat();
+    unawaited(HapticFeedback.heavyImpact());
+    unawaited(SystemSound.play(SystemSoundType.alert));
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  void _goBackToRewards() {
+    ref.invalidate(rewardsProvider);
+    context.go('/rewards');
   }
 
   @override
@@ -51,13 +61,13 @@ class _RewardVictoryScreenState extends ConsumerState<RewardVictoryScreen>
           data: (data) => _VictoryContent(
             detail: data,
             animation: _controller,
-            onBack: () => context.pop(),
+            onBack: _goBackToRewards,
           ),
           loading: () => const _VictoryLoading(),
           error: (error, stackTrace) => ListView(
             padding: const EdgeInsets.fromLTRB(18, 24, 18, 18),
             children: [
-              _TopBar(onBack: () => context.pop()),
+              _TopBar(onBack: _goBackToRewards),
               const SizedBox(height: 80),
               AppCard(
                 padding: const EdgeInsets.all(20),
@@ -811,9 +821,7 @@ String _formatDurationMs(int value) {
 }
 
 String _formatAmount(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Prix surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value);
 }
 
 String _rewardTypeLabel(RewardPrize reward) {

@@ -10,6 +10,7 @@ class AppButton extends StatefulWidget {
   final bool isGhost;
   final IconData? icon;
   final Color? color;
+  final Color? foregroundColor;
   final double? width;
   final double height;
 
@@ -22,6 +23,7 @@ class AppButton extends StatefulWidget {
     this.isGhost = false,
     this.icon,
     this.color,
+    this.foregroundColor,
     this.width,
     this.height = 54,
   });
@@ -81,7 +83,9 @@ class _AppButtonState extends State<AppButton> {
             borderRadius: BorderRadius.circular(16),
             child: Center(
               child: _buildChild(
-                isDisabled ? AppColors.textHint : Colors.white,
+                isDisabled
+                    ? AppColors.textHint
+                    : widget.foregroundColor ?? Colors.white,
               ),
             ),
           ),

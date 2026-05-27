@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../firebase_options.dart';
 import '../features/profile/providers/player_payment_methods_provider.dart';
+import '../features/rewards/providers/rewards_provider.dart';
 import 'app_telemetry_service.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -41,7 +42,10 @@ class FcmService {
   static RealtimeChannel? _notificationsChannel;
   static String? _notificationsUserId;
   static Timer? _syncRetryTimer;
+  static Timer? _winnerNavigationTimer;
   static int _syncRetryAttempt = 0;
+  static String? _lastWinnerNavigationId;
+  static DateTime? _lastWinnerNavigationAt;
 
   static Future<void> initialize() async {
     if (Firebase.apps.isEmpty) {
@@ -174,12 +178,12 @@ class FcmService {
 
   static Future<void> _configureForegroundPresentation() async {
     await _messaging.setForegroundNotificationPresentationOptions(
-      alert: false,
+      alert: true,
       badge: true,
-      sound: false,
+      sound: true,
     );
     debugPrint(
-      '[FCM][foreground] presentation alert=false badge=true sound=false',
+      '[FCM][foreground] presentation alert=true badge=true sound=true',
     );
   }
 
@@ -288,6 +292,7 @@ class FcmService {
             if (type == 'kyc') {
               _invalidateKycState();
             }
+            _openNotificationRecordTarget(notification);
           },
         )
         .subscribe();
@@ -348,6 +353,59 @@ class FcmService {
     }
   }
 
+  static void _invalidateRewardsState() {
+    final context = rootNavigatorKey.currentContext;
+    if (context == null) return;
+    try {
+      final container = ProviderScope.containerOf(context, listen: false);
+      container.invalidate(rewardsProvider);
+    } catch (_) {
+      // The app may still be bootstrapping when the notification arrives.
+    }
+  }
+
+  static void _openNotificationRecordTarget(Map<String, dynamic> notification) {
+    final type = notification['type'] as String?;
+    if (type != 'winner' && type != 'gain') return;
+
+    final rawData = notification['data'];
+    final data = rawData is Map
+        ? rawData.cast<String, dynamic>()
+        : <String, dynamic>{};
+    _openDataTarget(type: type, data: data);
+  }
+
+  static void _openWinnerVictory(String winnerId) {
+    final now = DateTime.now();
+    final lastAt = _lastWinnerNavigationAt;
+    if (_lastWinnerNavigationId == winnerId &&
+        lastAt != null &&
+        now.difference(lastAt) < const Duration(seconds: 3)) {
+      debugPrint('[FCM][winner] duplicate navigation ignored id=$winnerId');
+      return;
+    }
+
+    _lastWinnerNavigationId = winnerId;
+    _lastWinnerNavigationAt = now;
+    _winnerNavigationTimer?.cancel();
+    _winnerNavigationTimer = Timer(const Duration(milliseconds: 180), () {
+      final navigationContext = rootNavigatorKey.currentContext;
+      if (navigationContext == null) return;
+
+      final path = '/rewards/$winnerId';
+      try {
+        final currentPath = GoRouterState.of(navigationContext).uri.path;
+        if (currentPath == path) return;
+      } catch (_) {
+        // If the router state is unavailable during bootstrap, navigation can
+        // still safely proceed from the root context.
+      }
+
+      final navToken = DateTime.now().microsecondsSinceEpoch;
+      navigationContext.go('$path?nav=$navToken');
+    });
+  }
+
   static void _openDataTarget({
     required String? type,
     required Map<String, dynamic> data,
@@ -355,9 +413,23 @@ class FcmService {
     final context = rootNavigatorKey.currentContext;
     if (context == null) return;
 
+    final winnerId =
+        data['winner_id'] as String? ??
+        data['winnerId'] as String? ??
+        data['id'] as String?;
+
+    if ((type == 'winner' || type == 'gain') &&
+        winnerId != null &&
+        winnerId.isNotEmpty) {
+      _invalidateRewardsState();
+      _openWinnerVictory(winnerId);
+      return;
+    }
+
     switch (type) {
       case 'winner':
       case 'gain':
+        _invalidateRewardsState();
         context.go('/rewards');
         return;
       case 'subscription':

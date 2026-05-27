@@ -184,9 +184,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/rewards/:winnerId',
-            builder: (context, state) => RewardVictoryScreen(
-              winnerId: state.pathParameters['winnerId'] ?? '',
-            ),
+            pageBuilder: (context, state) {
+              final winnerId = state.pathParameters['winnerId'] ?? '';
+              final navToken = state.uri.queryParameters['nav'] ?? 'manual';
+              return NoTransitionPage(
+                key: ValueKey('reward-victory-$winnerId-$navToken'),
+                child: RewardVictoryScreen(winnerId: winnerId),
+              );
+            },
           ),
           GoRoute(
             path: '/notifications',
@@ -198,7 +203,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/subscriptions',
-            builder: (context, state) => const PlayerPlansScreen(),
+            pageBuilder: (context, state) {
+              final fromContest = state.uri.queryParameters['fromContest'];
+              return NoTransitionPage(
+                key: ValueKey('subscriptions-${fromContest ?? 'main'}'),
+                child: const PlayerPlansScreen(),
+              );
+            },
           ),
         ],
       ),

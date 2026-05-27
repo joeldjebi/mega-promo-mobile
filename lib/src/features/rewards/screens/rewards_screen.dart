@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -122,7 +123,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                         padding: const EdgeInsets.only(bottom: 9),
                         child: _RewardCard(
                           reward: reward,
-                          onTap: () => context.push('/rewards/${reward.id}'),
+                          onTap: () => context.go('/rewards/${reward.id}'),
                         ),
                       ),
                     ),
@@ -737,9 +738,7 @@ _RewardStatus _statusData(RewardPrize reward) {
 }
 
 String _formatAmount(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Prix surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value);
 }
 
 String _rewardMeta(RewardPrize reward) {

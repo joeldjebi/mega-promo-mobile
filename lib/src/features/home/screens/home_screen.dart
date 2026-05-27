@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
@@ -124,9 +126,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     categories.value ?? const <Category>[],
                     items,
                   );
-                  final effectiveCategoryId = availableCategories.any(
-                    (category) => category.id == _selectedCategoryId,
-                  )
+                  final effectiveCategoryId =
+                      availableCategories.any(
+                        (category) => category.id == _selectedCategoryId,
+                      )
                       ? _selectedCategoryId
                       : null;
                   final filtered = effectiveCategoryId == null
@@ -236,14 +239,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       if (boosted.isNotEmpty) ...[
                         Text('EN VEDETTE', style: AppTextStyles.label),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          height: 228,
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final itemWidth = boosted.length == 1
-                                  ? constraints.maxWidth
-                                  : 274.0;
-                              return ListView.separated(
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final textScale = MediaQuery.textScalerOf(
+                              context,
+                            ).scale(1);
+                            final featuredHeight =
+                                236.0 + (math.max(0.0, textScale - 1) * 160.0);
+                            final itemWidth = boosted.length == 1
+                                ? constraints.maxWidth
+                                : 274.0;
+                            return SizedBox(
+                              height: featuredHeight,
+                              child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 clipBehavior: Clip.none,
                                 itemCount: boosted.length,
@@ -257,9 +265,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                         .contains(boosted[index].id),
                                   );
                                 },
-                              );
-                            },
-                          ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 18),
                       ],
@@ -648,7 +656,7 @@ class _InfoMessageCard extends ConsumerWidget {
     }
 
     if (target.startsWith('/')) {
-      context.go(target);
+      context.push(target);
       return;
     }
 
@@ -679,12 +687,15 @@ class _FeaturedContestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final buttonHeight = 36.0 + (math.max(0.0, textScale - 1) * 8.0);
+
     return InkWell(
       onTap: () => context.push('/contests/${contest.id}'),
       borderRadius: BorderRadius.circular(20),
       child: Container(
         width: width,
-        padding: const EdgeInsets.all(13),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(20),
@@ -700,123 +711,152 @@ class _FeaturedContestCard extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (hasParticipated)
-                  const _ParticipatedBadge()
-                else
-                  const _SponsoredBadge(),
-                const SizedBox(width: 6),
-                if (contest.brandLogoUrl?.isNotEmpty == true) ...[
-                  _BrandLogo(url: contest.brandLogoUrl!, size: 26),
-                  const SizedBox(width: 5),
-                ],
-                Flexible(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceElevated,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: AppColors.gold.withValues(alpha: 0.28),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.schedule_rounded,
-                            color: AppColors.gold,
-                            size: 12,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: ContestTimer(
-                              endsAt: contest.computedLiveEndsAt,
-                              style: AppTextStyles.bodySmall.copyWith(
-                                fontSize: 10,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              contest.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.h2.copyWith(fontSize: 16.5, height: 1.13),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _formatPrize(contest.prizeValue),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.price.copyWith(fontSize: 21),
-            ),
-            const SizedBox(height: 8),
-            Container(height: 1, color: AppColors.separator),
-            const SizedBox(height: 8),
-            Row(
+        child: LayoutBuilder(
+          builder: (_, _) {
+            return Column(
               children: [
                 Expanded(
-                  child: _FeaturedMeta(
-                    icon: Icons.visibility_rounded,
-                    value: '${contest.viewsCount} vues',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _FeaturedMeta(
-                  icon: Icons.workspace_premium_rounded,
-                  value: '${contest.winnersCount} gagnants',
-                ),
-              ],
-            ),
-            const SizedBox(height: 7),
-            Text(
-              'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textSecondary,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              height: 38,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Center(
-                  child: Text(
-                    hasParticipated ? 'Déjà joué' : 'Participer',
-                    style: AppTextStyles.button.copyWith(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
+                  child: SingleChildScrollView(
+                    primary: false,
+                    physics: const ClampingScrollPhysics(),
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 5,
+                          runSpacing: 5,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            hasParticipated
+                                ? const _ParticipatedBadge()
+                                : const _SponsoredBadge(),
+                            if (contest.brandLogoUrl?.isNotEmpty == true)
+                              _BrandLogo(url: contest.brandLogoUrl!, size: 24),
+                            Container(
+                              constraints: BoxConstraints(
+                                maxWidth: math.min(width - 24, 178),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceElevated,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: AppColors.gold.withValues(alpha: 0.28),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.schedule_rounded,
+                                    color: AppColors.gold,
+                                    size: 11,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: ContestTimer(
+                                      endsAt: contest.computedLiveEndsAt,
+                                      style: AppTextStyles.bodySmall.copyWith(
+                                        fontSize: 9.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          contest.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.h2.copyWith(
+                            fontSize: 15.5,
+                            height: 1.12,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _formatPrize(contest.prizeValue),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.price.copyWith(fontSize: 19.5),
+                        ),
+                        const SizedBox(height: 7),
+                        Container(height: 1, color: AppColors.separator),
+                        const SizedBox(height: 7),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _FeaturedMeta(
+                                icon: Icons.visibility_rounded,
+                                value: '${contest.viewsCount} vues',
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: _FeaturedMeta(
+                                icon: Icons.workspace_premium_rounded,
+                                value: '${contest.winnersCount} gagnants',
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
+                SizedBox(
+                  width: double.infinity,
+                  height: buttonHeight,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: hasParticipated
+                          ? AppColors.surfaceBorder
+                          : AppColors.primary,
+                      borderRadius: BorderRadius.circular(13),
+                      border: hasParticipated
+                          ? Border.all(color: AppColors.separator)
+                          : null,
+                    ),
+                    child: Center(
+                      child: Text(
+                        hasParticipated
+                            ? 'Déjà joué · Voir détails'
+                            : 'Participer',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.button.copyWith(
+                          color: hasParticipated
+                              ? AppColors.textSecondary
+                              : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1100,7 +1140,7 @@ class _LiveQuizCard extends StatelessWidget {
                                       ),
                                     ),
                                   ],
-                                )
+                                ),
                         ),
                         if (!isEnded) ...[
                           const SizedBox(width: 8),
@@ -1735,9 +1775,7 @@ class _ContestErrorState extends StatelessWidget {
 }
 
 String _formatPrize(num value) {
-  final rounded = value.round();
-  if (rounded <= 0) return 'Prix surprise';
-  return '$rounded FCFA';
+  return formatCurrencyAmount(value);
 }
 
 String _shortDateTime(DateTime date) {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -18,6 +19,8 @@ class PlayerPlansScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(playerPlansProvider);
+    final fromContestId =
+        GoRouterState.of(context).uri.queryParameters['fromContest'];
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -27,6 +30,8 @@ class PlayerPlansScreen extends ConsumerWidget {
           onPressed: () {
             if (context.canPop()) {
               context.pop();
+            } else if (fromContestId != null && fromContestId.isNotEmpty) {
+              context.go('/contests/$fromContestId');
             } else {
               context.go('/profile');
             }
@@ -214,7 +219,7 @@ class _PlanCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Text(
-                plan.price == 0 ? 'Gratuit' : '${plan.price} FCFA',
+                formatCurrencyAmount(plan.price, zeroLabel: 'Gratuit'),
                 style: AppTextStyles.price.copyWith(fontSize: 17),
               ),
             ],
