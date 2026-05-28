@@ -73,7 +73,12 @@ class _ContestsScreenState extends ConsumerState<ContestsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Quiz promotionnels'),
+        backgroundColor: AppColors.primary,
+        title: const Text(
+          'Quiz promotionnels',
+          style: TextStyle(color: Colors.white),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           _ViewToggleButton(
             icon: Icons.view_agenda_rounded,
@@ -227,11 +232,11 @@ class _ViewToggleButton extends StatelessWidget {
     return IconButton(
       onPressed: onTap,
       icon: Icon(icon),
-      color: isSelected ? AppColors.primary : AppColors.textHint,
+      color: Colors.white,
       style: IconButton.styleFrom(
         backgroundColor: isSelected
-            ? AppColors.primary.withValues(alpha: 0.12)
-            : Colors.transparent,
+            ? Colors.white.withValues(alpha: 0.18)
+            : Colors.white.withValues(alpha: 0.06),
       ),
     );
   }

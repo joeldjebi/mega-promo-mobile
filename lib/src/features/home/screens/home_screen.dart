@@ -23,6 +23,14 @@ import '../providers/home_bootstrap_provider.dart';
 import '../providers/info_message_provider.dart';
 import '../providers/user_profile_provider.dart';
 
+const _homeBackgroundColor = AppColors.primary;
+const _homeOnBackgroundColor = Colors.white;
+const _homeTopBackgroundHeight = 352.0;
+const _homeHeaderBackgroundHeight = 24.0;
+const _homeCategoryBackgroundHeight = 122.0;
+const _homeContentCornerRadius = 28.0;
+const _homeAppBarHeight = 70.0;
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -90,239 +98,300 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _lastRegisteredLiveQuizIds ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
     final infoMessages = ref.watch(infoMessagesProvider);
+    final visibleCategories = _lastContests == null
+        ? const <Category>[]
+        : _categoriesWithContests(
+            categories.value ?? const <Category>[],
+            _lastContests!,
+          );
+    final hasLiveQuizInCurrentView = _hasLiveQuizForCurrentView(
+      _lastContests,
+      categories.value ?? const <Category>[],
+      _selectedCategoryId,
+    );
+    final topBackgroundHeight = hasLiveQuizInCurrentView
+        ? _homeTopBackgroundHeight
+        : visibleCategories.isNotEmpty
+        ? _homeCategoryBackgroundHeight
+        : _homeHeaderBackgroundHeight;
+    final contentBackgroundTop = hasLiveQuizInCurrentView
+        ? topBackgroundHeight - _homeContentCornerRadius
+        : topBackgroundHeight;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            final userId = ref.read(currentUserIdProvider);
-            clearHomeBootstrapCache(userId: userId, clearStored: true);
-            ref
-              ..invalidate(homeBootstrapProvider)
-              ..invalidate(contestsProvider)
-              ..invalidate(userParticipatedContestIdsProvider)
-              ..invalidate(userRegisteredLiveQuizIdsProvider)
-              ..invalidate(categoriesProvider);
-            ref.read(contestsShuffleSeedProvider.notifier).refresh();
-            await Future.wait([
-              ref.refresh(homeBootstrapProvider.future),
-              ref.refresh(contestsProvider.future),
-            ]);
-          },
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-            children: [
-              profile.when(
-                data: (user) => _HomeHeader(user: user),
-                loading: () => const _HomeHeaderShimmer(),
-                error: (error, stackTrace) => const _HomeHeaderError(),
+      backgroundColor: _homeBackgroundColor,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: _homeBackgroundColor,
+        elevation: 0,
+        toolbarHeight: _homeAppBarHeight,
+        titleSpacing: 16,
+        title: profile.when(
+          data: (user) => _HomeHeader(user: user),
+          loading: () => const _HomeHeaderShimmer(),
+          error: (error, stackTrace) => const _HomeHeaderError(),
+        ),
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: ColoredBox(color: _homeBackgroundColor),
+          ),
+          Positioned(
+            top: contentBackgroundTop,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(_homeContentCornerRadius),
+                ),
               ),
-              const SizedBox(height: 14),
-              contests.when(
-                data: (items) {
-                  _preloadContestAssets(items);
-                  final availableCategories = _categoriesWithContests(
-                    categories.value ?? const <Category>[],
-                    items,
-                  );
-                  final effectiveCategoryId =
-                      availableCategories.any(
-                        (category) => category.id == _selectedCategoryId,
-                      )
-                      ? _selectedCategoryId
-                      : null;
-                  final filtered = effectiveCategoryId == null
-                      ? items
-                      : items
-                            .where(
-                              (contest) =>
-                                  _contestCategoryId(contest) ==
-                                  effectiveCategoryId,
-                            )
-                            .toList();
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: RefreshIndicator(
+              onRefresh: () async {
+                final userId = ref.read(currentUserIdProvider);
+                clearHomeBootstrapCache(userId: userId, clearStored: true);
+                ref
+                  ..invalidate(homeBootstrapProvider)
+                  ..invalidate(contestsProvider)
+                  ..invalidate(userParticipatedContestIdsProvider)
+                  ..invalidate(userRegisteredLiveQuizIdsProvider)
+                  ..invalidate(categoriesProvider);
+                ref.read(contestsShuffleSeedProvider.notifier).refresh();
+                await Future.wait([
+                  ref.refresh(homeBootstrapProvider.future),
+                  ref.refresh(contestsProvider.future),
+                ]);
+              },
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                children: [
+                  contests.when(
+                    data: (items) {
+                      _preloadContestAssets(items);
+                      final availableCategories = _categoriesWithContests(
+                        categories.value ?? const <Category>[],
+                        items,
+                      );
+                      final effectiveCategoryId =
+                          availableCategories.any(
+                            (category) => category.id == _selectedCategoryId,
+                          )
+                          ? _selectedCategoryId
+                          : null;
+                      final filtered = effectiveCategoryId == null
+                          ? items
+                          : items
+                                .where(
+                                  (contest) =>
+                                      _contestCategoryId(contest) ==
+                                      effectiveCategoryId,
+                                )
+                                .toList();
 
-                  if (items.isEmpty) return const _EmptyContestsState();
-                  if (filtered.isEmpty) return const _EmptyContestsState();
+                      if (items.isEmpty) return const _EmptyContestsState();
+                      if (filtered.isEmpty) return const _EmptyContestsState();
 
-                  final liveQuizzes =
-                      filtered
-                          .where((contest) => contest.isLiveVisibleOnHome)
-                          .toList()
-                        ..sort((a, b) {
-                          final rankCompare = _liveQuizHomeRank(
-                            a,
-                          ).compareTo(_liveQuizHomeRank(b));
-                          if (rankCompare != 0) return rankCompare;
-                          if (a.isLiveEnded && b.isLiveEnded) {
-                            return b.computedLiveEndsAt.compareTo(
-                              a.computedLiveEndsAt,
-                            );
-                          }
-                          final aDate =
-                              a.liveStartsAt ??
-                              a.startsAt ??
-                              a.computedLiveEndsAt;
-                          final bDate =
-                              b.liveStartsAt ??
-                              b.startsAt ??
-                              b.computedLiveEndsAt;
-                          return aDate.compareTo(bDate);
-                        });
-                  final boosted = shuffleContestsForSession(
-                    filtered.where(
-                      (contest) => contest.isBoosted && !contest.isLive,
-                    ),
-                    shuffleSeed,
-                  ).take(5).toList();
-                  final allContests = shuffleContestsForSession(
-                    filtered.where((contest) => !contest.isLive),
-                    shuffleSeed,
-                  );
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (availableCategories.isNotEmpty) ...[
-                        _HomeCategoryFilters(
-                          categories: availableCategories,
-                          selectedCategoryId: effectiveCategoryId,
-                          onSelected: (categoryId) =>
-                              setState(() => _selectedCategoryId = categoryId),
+                      final liveQuizzes =
+                          filtered
+                              .where((contest) => contest.isLiveVisibleOnHome)
+                              .toList()
+                            ..sort((a, b) {
+                              final rankCompare = _liveQuizHomeRank(
+                                a,
+                              ).compareTo(_liveQuizHomeRank(b));
+                              if (rankCompare != 0) return rankCompare;
+                              if (a.isLiveEnded && b.isLiveEnded) {
+                                return b.computedLiveEndsAt.compareTo(
+                                  a.computedLiveEndsAt,
+                                );
+                              }
+                              final aDate =
+                                  a.liveStartsAt ??
+                                  a.startsAt ??
+                                  a.computedLiveEndsAt;
+                              final bDate =
+                                  b.liveStartsAt ??
+                                  b.startsAt ??
+                                  b.computedLiveEndsAt;
+                              return aDate.compareTo(bDate);
+                            });
+                      final boosted = shuffleContestsForSession(
+                        filtered.where(
+                          (contest) => contest.isBoosted && !contest.isLive,
                         ),
-                        const SizedBox(height: 16),
+                        shuffleSeed,
+                      ).take(5).toList();
+                      final allContests = shuffleContestsForSession(
+                        filtered.where((contest) => !contest.isLive),
+                        shuffleSeed,
+                      );
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (availableCategories.isNotEmpty) ...[
+                            _HomeCategoryFilters(
+                              categories: availableCategories,
+                              selectedCategoryId: effectiveCategoryId,
+                              onSelected: (categoryId) => setState(
+                                () => _selectedCategoryId = categoryId,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
                       ],
                       if (liveQuizzes.isNotEmpty) ...[
-                        Text('QUIZ LIVE', style: AppTextStyles.label),
+                        Text(
+                          'QUIZ LIVE',
+                          style: AppTextStyles.label.copyWith(
+                            color: _homeOnBackgroundColor,
+                          ),
+                        ),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          height: 214,
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final itemWidth = liveQuizzes.length == 1
-                                  ? constraints.maxWidth
-                                  : 318.0;
-                              return ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                clipBehavior: Clip.none,
-                                itemCount: liveQuizzes.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(width: 10),
-                                itemBuilder: (context, index) {
-                                  final contest = liveQuizzes[index];
-                                  return SizedBox(
-                                    width: itemWidth,
-                                    child: _LiveQuizCard(
-                                      contest: contest,
-                                      hasParticipated: participatedContestIds
-                                          .contains(contest.id),
-                                      isRegistered: registeredLiveQuizIds
-                                          .contains(contest.id),
+                            SizedBox(
+                              height: 214,
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final itemWidth = liveQuizzes.length == 1
+                                      ? constraints.maxWidth
+                                      : 318.0;
+                                  return ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    clipBehavior: Clip.none,
+                                    itemCount: liveQuizzes.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 10),
+                                    itemBuilder: (context, index) {
+                                      final contest = liveQuizzes[index];
+                                      return SizedBox(
+                                        width: itemWidth,
+                                        child: _LiveQuizCard(
+                                          contest: contest,
+                                          hasParticipated:
+                                              participatedContestIds.contains(
+                                                contest.id,
+                                              ),
+                                          isRegistered: registeredLiveQuizIds
+                                              .contains(contest.id),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          infoMessages.maybeWhen(
+                            data: (messages) => messages.isEmpty
+                                ? const SizedBox.shrink()
+                                : Padding(
+                                    padding: const EdgeInsets.only(bottom: 16),
+                                    child: _InfoMessageCarousel(
+                                      messages: messages,
                                     ),
-                                  );
-                                },
-                              );
-                            },
+                                  ),
+                            orElse: () => const SizedBox.shrink(),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      infoMessages.maybeWhen(
-                        data: (messages) => messages.isEmpty
-                            ? const SizedBox.shrink()
-                            : Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: _InfoMessageCarousel(messages: messages),
-                              ),
-                        orElse: () => const SizedBox.shrink(),
-                      ),
-                      if (boosted.isNotEmpty) ...[
-                        Text('EN VEDETTE', style: AppTextStyles.label),
-                        const SizedBox(height: 10),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final textScale = MediaQuery.textScalerOf(
-                              context,
-                            ).scale(1);
-                            final featuredHeight =
-                                248.0 + (math.max(0.0, textScale - 1) * 172.0);
-                            final itemWidth = boosted.length == 1
-                                ? constraints.maxWidth
-                                : 274.0;
-                            return SizedBox(
-                              height: featuredHeight,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                clipBehavior: Clip.none,
-                                itemCount: boosted.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(width: 10),
-                                itemBuilder: (context, index) {
-                                  return _FeaturedContestCard(
-                                    width: itemWidth,
-                                    contest: boosted[index],
+                          if (boosted.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            const _HomeSectionLabel('EN VEDETTE'),
+                            const SizedBox(height: 10),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final textScale = MediaQuery.textScalerOf(
+                                  context,
+                                ).scale(1);
+                                final featuredHeight =
+                                    248.0 +
+                                    (math.max(0.0, textScale - 1) * 172.0);
+                                final itemWidth = boosted.length == 1
+                                    ? constraints.maxWidth
+                                    : 274.0;
+                                return SizedBox(
+                                  height: featuredHeight,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    clipBehavior: Clip.none,
+                                    itemCount: boosted.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 10),
+                                    itemBuilder: (context, index) {
+                                      return _FeaturedContestCard(
+                                        width: itemWidth,
+                                        contest: boosted[index],
+                                        hasParticipated: participatedContestIds
+                                            .contains(boosted[index].id),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                          ],
+                          const _HomeSectionLabel('TOUS LES CONCOURS'),
+                          const SizedBox(height: 10),
+                          ...allContests
+                              .take(10)
+                              .map(
+                                (contest) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 9),
+                                  child: _CompactContestCard(
+                                    contest: contest,
                                     hasParticipated: participatedContestIds
-                                        .contains(boosted[index].id),
-                                  );
-                                },
+                                        .contains(contest.id),
+                                  ),
+                                ),
                               ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-                      Text('TOUS LES CONCOURS', style: AppTextStyles.label),
-                      const SizedBox(height: 10),
-                      ...allContests
-                          .take(10)
-                          .map(
-                            (contest) => Padding(
-                              padding: const EdgeInsets.only(bottom: 9),
-                              child: _CompactContestCard(
-                                contest: contest,
-                                hasParticipated: participatedContestIds
-                                    .contains(contest.id),
-                              ),
-                            ),
-                          ),
-                      if (allContests.length > 10) ...[
-                        const SizedBox(height: 4),
-                        InkWell(
-                          onTap: () => context.go('/contests'),
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface,
+                          if (allContests.length > 10) ...[
+                            const SizedBox(height: 4),
+                            InkWell(
+                              onTap: () => context.go('/contests'),
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: AppColors.surfaceBorder,
-                              ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                'Voir tout',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w800,
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 13,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: AppColors.surfaceBorder,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Voir tout',
+                                    style: AppTextStyles.bodySmall.copyWith(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  );
-                },
-                loading: () => const _ContestListShimmer(),
-                error: (error, stackTrace) => _ContestErrorState(
-                  onRetry: () => ref.invalidate(homeBootstrapProvider),
-                ),
+                          ],
+                        ],
+                      );
+                    },
+                    loading: () => const _ContestListShimmer(),
+                    error: (error, stackTrace) => _ContestErrorState(
+                      onRetry: () => ref.invalidate(homeBootstrapProvider),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -349,6 +418,29 @@ List<Category> _categoriesWithContests(
   return categories
       .where((category) => contestCategoryIds.contains(category.id))
       .toList(growable: false);
+}
+
+bool _hasLiveQuizForCurrentView(
+  List<Contest>? contests,
+  List<Category> categories,
+  String? selectedCategoryId,
+) {
+  if (contests == null || contests.isEmpty) return false;
+
+  final availableCategories = _categoriesWithContests(categories, contests);
+  final effectiveCategoryId =
+      availableCategories.any((category) => category.id == selectedCategoryId)
+      ? selectedCategoryId
+      : null;
+  final filtered = effectiveCategoryId == null
+      ? contests
+      : contests
+            .where(
+              (contest) => _contestCategoryId(contest) == effectiveCategoryId,
+            )
+            .toList(growable: false);
+
+  return filtered.any((contest) => contest.isLiveVisibleOnHome);
 }
 
 String? _contestCategoryId(Contest contest) {
@@ -381,7 +473,10 @@ class _HomeCategoryFilters extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('CATÉGORIES', style: AppTextStyles.label),
+        Text(
+          'CATÉGORIES',
+          style: AppTextStyles.label.copyWith(color: _homeOnBackgroundColor),
+        ),
         const SizedBox(height: 9),
         SizedBox(
           height: 38,
@@ -404,29 +499,31 @@ class _HomeCategoryFilters extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? accentColor.withValues(alpha: 0.18)
-                        : AppColors.surface,
+                        ? Colors.black.withValues(alpha: 0.18)
+                        : Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: isSelected
-                          ? accentColor.withValues(alpha: 0.58)
-                          : AppColors.surfaceBorder,
+                          ? Colors.white.withValues(alpha: 0.74)
+                          : Colors.white.withValues(alpha: 0.28),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (category != null) ...[
-                        Icon(category.icon, color: accentColor, size: 15),
+                        Icon(
+                          category.icon,
+                          color: _homeOnBackgroundColor,
+                          size: 15,
+                        ),
                         const SizedBox(width: 6),
                       ],
                       Text(
                         category?.name ?? 'Toutes',
                         style: AppTextStyles.bodySmall.copyWith(
                           fontSize: 10.8,
-                          color: isSelected
-                              ? AppColors.textPrimary
-                              : AppColors.textSecondary,
+                          color: _homeOnBackgroundColor,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -438,6 +535,43 @@ class _HomeCategoryFilters extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HomeSectionLabel extends StatelessWidget {
+  final String text;
+
+  const _HomeSectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.surfaceBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            text,
+            style: AppTextStyles.label.copyWith(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1814,7 +1948,10 @@ class _HomeHeader extends StatelessWidget {
             children: [
               Text(
                 _homeGreeting(),
-                style: AppTextStyles.bodySecondary.copyWith(fontSize: 12.5),
+                style: AppTextStyles.bodySecondary.copyWith(
+                  color: _homeOnBackgroundColor.withValues(alpha: 0.82),
+                  fontSize: 12.5,
+                ),
               ),
               const SizedBox(height: 1),
               Text(
@@ -1822,6 +1959,7 @@ class _HomeHeader extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.h1.copyWith(
+                  color: _homeOnBackgroundColor,
                   fontSize: 23,
                   fontWeight: FontWeight.w800,
                 ),

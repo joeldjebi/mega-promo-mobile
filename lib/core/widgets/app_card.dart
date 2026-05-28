@@ -9,6 +9,7 @@ class AppCard extends StatefulWidget {
   final bool showGlow;
   final double? borderRadius;
   final Gradient? gradient;
+  final Color? backgroundColor;
 
   const AppCard({
     super.key,
@@ -19,6 +20,7 @@ class AppCard extends StatefulWidget {
     this.showGlow = false,
     this.borderRadius,
     this.gradient,
+    this.backgroundColor,
   });
 
   @override
@@ -52,7 +54,7 @@ class _AppCardState extends State<AppCard> {
         child: Ink(
           padding: widget.padding ?? const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: AppColors.surface,
+            color: widget.backgroundColor ?? AppColors.surface,
             borderRadius: radius,
             border: Border.all(
               color: widget.showGlow

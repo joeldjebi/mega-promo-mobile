@@ -44,7 +44,20 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: AppColors.primary,
+        elevation: 0,
+        toolbarHeight: 76,
+        titleSpacing: 20,
+        title: _Header(
+          hasContest: hasContest,
+          hasLiveQuizScope: _scope == LeaderboardScope.liveQuiz,
+          onPrimary: true,
+        ),
+      ),
       body: SafeArea(
+        top: false,
         child: leaderboard.when(
           data: (data) {
             final users = data.users;
@@ -81,14 +94,9 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
             ];
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
               children: [
-                _Header(
-                  hasContest: hasContest,
-                  hasLiveQuizScope: data.hasLiveQuizScope,
-                ),
                 if (!hasContest) ...[
-                  const SizedBox(height: 14),
                   _LeaderboardScopeTabs(
                     selectedScope: _scope,
                     onChanged: (scope) => setState(() => _scope = scope),
@@ -132,18 +140,38 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
 class _Header extends StatelessWidget {
   final bool hasContest;
   final bool hasLiveQuizScope;
+  final bool onPrimary;
 
-  const _Header({required this.hasContest, required this.hasLiveQuizScope});
+  const _Header({
+    required this.hasContest,
+    required this.hasLiveQuizScope,
+    this.onPrimary = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final titleColor = onPrimary ? Colors.white : AppColors.textPrimary;
+    final subtitleColor = onPrimary
+        ? Colors.white.withValues(alpha: 0.78)
+        : AppColors.textSecondary;
+    final iconBackground = onPrimary
+        ? Colors.white.withValues(alpha: 0.16)
+        : AppColors.surface;
+    final iconBorder = onPrimary
+        ? Colors.white.withValues(alpha: 0.24)
+        : AppColors.surfaceBorder;
+    final iconColor = onPrimary ? Colors.white : AppColors.primary;
+
     return Row(
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Classement', style: AppTextStyles.h1),
+              Text(
+                'Classement',
+                style: AppTextStyles.h1.copyWith(color: titleColor),
+              ),
               const SizedBox(height: 5),
               Text(
                 hasContest
@@ -151,7 +179,9 @@ class _Header extends StatelessWidget {
                     : hasLiveQuizScope
                     ? 'Les meilleurs joueurs Quiz Live'
                     : 'Les meilleurs joueurs MegaPromo',
-                style: AppTextStyles.bodySecondary,
+                style: AppTextStyles.bodySecondary.copyWith(
+                  color: subtitleColor,
+                ),
               ),
             ],
           ),
@@ -160,13 +190,13 @@ class _Header extends StatelessWidget {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: AppColors.surface,
+            color: iconBackground,
             borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: AppColors.surfaceBorder),
+            border: Border.all(color: iconBorder),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.leaderboard_rounded,
-            color: AppColors.primary,
+            color: iconColor,
             size: 22,
           ),
         ),
@@ -318,9 +348,20 @@ class _Podium extends StatelessWidget {
     final second = users.length > 1 ? users[1] : null;
     final third = users.length > 2 ? users[2] : null;
 
-    return AppCard(
+    return Container(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-      borderRadius: 26,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0EDFF),
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.16)),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.subtleShadow,
+            blurRadius: 14,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -12,6 +12,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
@@ -2572,6 +2573,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
 
       widget.ref.invalidate(userProfileProvider);
       widget.ref.invalidate(profileDataProvider);
+      clearHomeBootstrapCache(userId: currentUser.id, clearStored: true);
+      widget.ref.invalidate(homeBootstrapProvider);
 
       if (mounted) Navigator.of(context).pop();
     } catch (error, stackTrace) {

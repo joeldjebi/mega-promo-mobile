@@ -17,6 +17,8 @@ import '../providers/rewards_provider.dart';
 
 enum _RewardsTab { contests, liveQuiz }
 
+const _rewardsCardBackground = Color(0xFFF0EDFF);
+
 class RewardsScreen extends ConsumerStatefulWidget {
   const RewardsScreen({super.key});
 
@@ -67,7 +69,22 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: AppColors.primary,
+        elevation: 0,
+        centerTitle: true,
+        title: Text(
+          'RÉCOMPENSES',
+          style: AppTextStyles.label.copyWith(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
       body: SafeArea(
+        top: false,
         child: RefreshIndicator(
           onRefresh: () async {
             ref.invalidate(rewardsProvider);
@@ -88,17 +105,6 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
                 children: [
-                  Center(
-                    child: Text(
-                      'RÉCOMPENSES',
-                      style: AppTextStyles.label.copyWith(
-                        color: AppColors.textHint,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
                   _RewardsSummary(items: items),
                   const SizedBox(height: 14),
                   _RewardsTabBar(
@@ -135,6 +141,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
               padding: const EdgeInsets.fromLTRB(24, 120, 24, 24),
               children: [
                 AppCard(
+                  backgroundColor: _rewardsCardBackground,
                   child: Column(
                     children: [
                       const Icon(
@@ -346,6 +353,7 @@ class _RewardsSummary extends StatelessWidget {
     final totalValue = items.fold<num>(0, (sum, item) => sum + item.value);
 
     return AppCard(
+      backgroundColor: _rewardsCardBackground,
       showGlow: true,
       padding: const EdgeInsets.all(16),
       borderRadius: 20,
@@ -451,6 +459,7 @@ class _RewardCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: AppCard(
+          backgroundColor: _rewardsCardBackground,
           padding: const EdgeInsets.all(12),
           borderRadius: 18,
           child: Row(
@@ -592,6 +601,7 @@ class _EmptyRewardsState extends StatelessWidget {
     final isLiveQuiz = tab == _RewardsTab.liveQuiz;
 
     return AppCard(
+      backgroundColor: _rewardsCardBackground,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 26),
       borderRadius: 20,
       child: Column(

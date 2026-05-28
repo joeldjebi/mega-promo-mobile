@@ -14,6 +14,7 @@ import '../features/account/screens/account_reactivation_screen.dart';
 import '../features/contests/screens/contest_detail_screen.dart';
 import '../features/contests/screens/contests_screen.dart';
 import '../features/home/screens/home_screen.dart';
+import '../features/intro/screens/app_intro_onboarding_screen.dart';
 import '../features/leaderboard/screens/leaderboard_screen.dart';
 import '../features/legal/screens/legal_page_screen.dart';
 import '../features/live_quiz/screens/live_quiz_waiting_screen.dart';
@@ -33,8 +34,13 @@ import '../services/fcm_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final supabase = ref.watch(supabaseProvider);
-  final appFeatureFlags = ref.watch(appFeatureFlagsProvider);
   final routerRefresh = GoRouterRefreshStream(supabase.auth.onAuthStateChange);
+  ref.listen<AsyncValue<AppFeatureFlags>>(appFeatureFlagsProvider, (
+    previous,
+    next,
+  ) {
+    routerRefresh.refresh();
+  });
   ref.onDispose(routerRefresh.dispose);
 
   return GoRouter(
@@ -89,7 +95,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           userId: currentUser.id,
           goingToMaintenance: goingToMaintenance,
           maintenanceEnabled:
-              appFeatureFlags.asData?.value.appMaintenanceEnabled,
+              ref
+                  .read(appFeatureFlagsProvider)
+                  .asData
+                  ?.value
+                  .appMaintenanceEnabled,
         );
         if (maintenanceRedirect != null) return maintenanceRedirect;
 
@@ -114,6 +124,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/splash',
         builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: '/intro',
+        builder: (context, state) => const AppIntroOnboardingScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
@@ -330,6 +344,8 @@ class GoRouterRefreshStream extends ChangeNotifier {
   GoRouterRefreshStream(Stream<dynamic> stream) {
     _subscription = stream.listen((_) => notifyListeners());
   }
+
+  void refresh() => notifyListeners();
 
   @override
   void dispose() {

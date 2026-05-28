@@ -10,6 +10,7 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import '../../app_update/screens/force_update_screen.dart';
 import '../../app_update/services/app_update_service.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
+import '../../intro/services/app_onboarding_service.dart';
 import '../providers/auth_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -33,6 +34,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (!mounted) return;
     if (updateStatus.mustUpdate && updateStatus.config != null) {
       setState(() => _forceUpdateConfig = updateStatus.config);
+      return;
+    }
+
+    final hasSeenIntro = await AppOnboardingService.hasSeen();
+    if (!mounted) return;
+    if (!hasSeenIntro) {
+      context.go('/intro');
       return;
     }
 

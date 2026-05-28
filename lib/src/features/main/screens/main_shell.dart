@@ -385,21 +385,31 @@ class _MainBottomNav extends StatelessWidget {
     final selectedIndex = _currentIndex(context);
 
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
-        border: Border(top: BorderSide(color: AppColors.surfaceBorder)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: const Border(
+          top: BorderSide(color: AppColors.surfaceBorder, width: 0.8),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 22,
+            offset: const Offset(0, -8),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
           child: Container(
-            height: 66,
-            padding: const EdgeInsets.all(5),
+            height: 68,
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F6FA),
+              color: AppColors.background,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.surfaceBorder),
+              border: Border.all(color: AppColors.surfaceBorder, width: 0.8),
             ),
             child: Row(
               children: List.generate(MainShell._items.length, (index) {
@@ -448,11 +458,13 @@ class _BottomNavItem extends StatelessWidget {
           height: 56,
           padding: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.accent : Colors.transparent,
+            color: isSelected
+                ? AppColors.primary.withValues(alpha: 0.1)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(19),
             border: Border.all(
               color: isSelected
-                  ? AppColors.primary.withValues(alpha: 0.18)
+                  ? AppColors.primary.withValues(alpha: 0.2)
                   : Colors.transparent,
             ),
           ),
@@ -460,28 +472,43 @@ class _BottomNavItem extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                width: isSelected ? 20 : 5,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 5),
               AnimatedScale(
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
-                scale: isSelected ? 1.03 : 0.94,
+                scale: isSelected ? 1.08 : 0.94,
                 child: Icon(
                   item.icon,
-                  color: isSelected ? AppColors.primary : AppColors.textHint,
-                  size: 22,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textHint.withValues(alpha: 0.78),
+                  size: 21,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 3),
               Text(
                 item.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySmall.copyWith(
-                  color: isSelected ? AppColors.primary : AppColors.textHint,
-                  fontSize: 12,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textHint.withValues(alpha: 0.82),
+                  fontSize: 11,
                   height: 1.05,
                   letterSpacing: 0,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                 ),
               ),
             ],
