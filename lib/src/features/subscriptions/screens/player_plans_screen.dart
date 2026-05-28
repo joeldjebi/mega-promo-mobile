@@ -8,6 +8,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
 import '../providers/player_subscription_provider.dart';
@@ -27,6 +28,7 @@ class PlayerPlansScreen extends ConsumerWidget {
       plans: plans,
       fromContestId: fromContestId,
     );
+    final isHiddenForStore = AppStoreReviewMode.hidePaidPlans;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -43,16 +45,18 @@ class PlayerPlansScreen extends ConsumerWidget {
             }
           },
         ),
-        title: const Text('Mon forfait'),
+        title: Text(isHiddenForStore ? 'Offres' : 'Mon forfait'),
       ),
       body: SafeArea(
-        child: featureFlags.when(
-          data: (flags) => flags.playerSubscriptionsEnabled
-              ? plansContent
-              : _PlansUnavailable(fromContestId: fromContestId),
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, stackTrace) => plansContent,
-        ),
+        child: isHiddenForStore
+            ? _PlansUnavailable(fromContestId: fromContestId)
+            : featureFlags.when(
+                data: (flags) => flags.playerSubscriptionsEnabled
+                    ? plansContent
+                    : _PlansUnavailable(fromContestId: fromContestId),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stackTrace) => plansContent,
+              ),
       ),
     );
   }
@@ -160,13 +164,13 @@ class _PlansUnavailable extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                'Forfaits indisponibles',
+                'Offres indisponibles',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.h2.copyWith(fontSize: 18),
               ),
               const SizedBox(height: 8),
               Text(
-                'Cette section est temporairement désactivée.',
+                'Cette section est temporairement indisponible.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodySecondary,
               ),

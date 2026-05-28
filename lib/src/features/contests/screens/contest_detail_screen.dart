@@ -12,6 +12,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../config/app_store_review_mode.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
@@ -20,6 +21,7 @@ import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/live_quiz_notification_service.dart';
 import '../../../services/synced_clock_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../../social/share_helpers.dart';
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
@@ -64,6 +66,7 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appFeatureFlagsProvider);
     final userId = ref.watch(authStateProvider).value?.id;
     _syncRealtimeRefresh(userId);
 
@@ -73,6 +76,9 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
       backgroundColor: AppColors.background,
       body: detail.when(
         data: (data) {
+          if (_isHiddenForAppStoreReview(data.contest)) {
+            return const _CampaignUnavailableForStore();
+          }
           _preloadContestAssets(data.contest);
           return _ContestDetailBody(data: data);
         },
@@ -291,6 +297,64 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
       unawaited(Supabase.instance.client.removeChannel(channel));
     }
     super.dispose();
+  }
+}
+
+bool _isHiddenForAppStoreReview(Contest contest) {
+  if (!AppStoreReviewMode.hideRandomOrPredictionCampaigns) return false;
+  return contest.type == ContestType.tirage ||
+      contest.type == ContestType.pronostic;
+}
+
+class _CampaignUnavailableForStore extends StatelessWidget {
+  const _CampaignUnavailableForStore();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: AppCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.campaign_rounded,
+                  color: AppColors.primary,
+                  size: 44,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Campagne indisponible',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.h2.copyWith(fontSize: 18),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Cette campagne promotionnelle n’est pas disponible dans cette version.',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodySecondary,
+                ),
+                const SizedBox(height: 16),
+                AppButton(
+                  text: 'Retour',
+                  isOutlined: true,
+                  onPressed: () {
+                    if (context.canPop()) {
+                      context.pop();
+                    } else {
+                      context.go('/home');
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2483,6 +2547,9 @@ class _ShimmerBox extends StatelessWidget {
 }
 
 String _formatPrize(num value) {
+  if (AppStoreReviewMode.hideCashAmounts) {
+    return 'Récompense partenaire';
+  }
   return formatCurrencyAmount(value);
 }
 
@@ -2499,12 +2566,22 @@ String _shortDateTime(DateTime date) {
 }
 
 String _winnerText(Contest contest) {
+  if (AppStoreReviewMode.enabled) {
+    return contest.winnersCount > 1
+        ? '${contest.winnersCount} récompenses'
+        : '1 récompense';
+  }
   return contest.winnersCount > 1
       ? '${contest.winnersCount} lauréats'
       : '1 lauréat';
 }
 
 String _winnerDesignationText(Contest contest) {
+  if (AppStoreReviewMode.enabled) {
+    return contest.winnersCount > 1
+        ? '${contest.winnersCount} récompenses prévues'
+        : '1 récompense prévue';
+  }
   return contest.winnersCount > 1
       ? '${contest.winnersCount} lauréats désignés'
       : '1 lauréat désigné';

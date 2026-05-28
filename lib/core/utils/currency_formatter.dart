@@ -1,7 +1,12 @@
+import 'package:mega_promo/src/config/app_store_review_mode.dart';
+
 String formatCurrencyAmount(
   num value, {
   String zeroLabel = 'Récompense surprise',
 }) {
+  if (AppStoreReviewMode.hideCashAmounts) {
+    return 'Récompense partenaire';
+  }
   final rounded = value.round();
   if (rounded <= 0) return zeroLabel;
   return '${formatThousands(rounded)} FCFA';

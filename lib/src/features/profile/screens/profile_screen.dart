@@ -39,7 +39,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         : AsyncData(_lastProfileData!);
     final featureFlags = ref.watch(appFeatureFlagsProvider).maybeWhen(
           data: (flags) => flags,
-          orElse: () => AppFeatureFlags.defaults,
+          orElse: () => AppFeatureFlags.defaults.appStoreSafe(),
         );
 
     return Scaffold(
@@ -49,6 +49,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           data: (data) => _CompactProfilePage(
             data: data,
             showPlansAction: featureFlags.playerSubscriptionsEnabled,
+            showCoordinatesAction:
+                featureFlags.playerProfileCoordinatesEnabled,
+            showRewardsAction: featureFlags.playerProfileRewardsEnabled,
             onEdit: () => _showEditProfileSheet(context, ref, data),
           ),
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -71,11 +74,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 class _CompactProfilePage extends StatelessWidget {
   final ProfileData data;
   final bool showPlansAction;
+  final bool showCoordinatesAction;
+  final bool showRewardsAction;
   final VoidCallback onEdit;
 
   const _CompactProfilePage({
     required this.data,
     required this.showPlansAction,
+    required this.showCoordinatesAction,
+    required this.showRewardsAction,
     required this.onEdit,
   });
 
@@ -115,6 +122,8 @@ class _CompactProfilePage extends StatelessWidget {
                   child: _ProfileActionPanel(
                     data: data,
                     showPlansAction: showPlansAction,
+                    showCoordinatesAction: showCoordinatesAction,
+                    showRewardsAction: showRewardsAction,
                     isCompact: isCompact,
                     onEdit: onEdit,
                   ),
@@ -571,12 +580,16 @@ class _CompactDivider extends StatelessWidget {
 class _ProfileActionPanel extends StatelessWidget {
   final ProfileData data;
   final bool showPlansAction;
+  final bool showCoordinatesAction;
+  final bool showRewardsAction;
   final bool isCompact;
   final VoidCallback onEdit;
 
   const _ProfileActionPanel({
     required this.data,
     required this.showPlansAction,
+    required this.showCoordinatesAction,
+    required this.showRewardsAction,
     required this.isCompact,
     required this.onEdit,
   });
@@ -611,29 +624,33 @@ class _ProfileActionPanel extends StatelessWidget {
           loader: () => fetchProfileParticipationsPage(limit: 50),
         ),
       ),
-      _ProfileAction(
-        icon: Icons.card_giftcard_rounded,
-        title: 'Récompenses',
-        subtitle: data.wins.isEmpty ? 'Aucun' : '${data.wins.length} récents',
-        onTap: () => _showProfileActivitySheet(
-          context,
-          title: 'Toutes mes récompenses',
+      if (showRewardsAction)
+        _ProfileAction(
           icon: Icons.card_giftcard_rounded,
-          loader: () => fetchProfileWinsPage(limit: 50),
+          title: 'Récompenses',
+          subtitle: data.wins.isEmpty
+              ? 'Aucun'
+              : '${data.wins.length} récents',
+          onTap: () => _showProfileActivitySheet(
+            context,
+            title: 'Toutes mes récompenses',
+            icon: Icons.card_giftcard_rounded,
+            loader: () => fetchProfileWinsPage(limit: 50),
+          ),
         ),
-      ),
       _ProfileAction(
         icon: Icons.military_tech_outlined,
         title: 'Badges',
         subtitle: data.badges.isEmpty ? 'Aucun' : '${data.badges.length}',
         onTap: () => _showBadgesSheet(context, data.badges),
       ),
-      _ProfileAction(
-        icon: Icons.account_balance_wallet_rounded,
-        title: 'Coordonnées',
-        subtitle: 'Coordonnées',
-        onTap: () => _showPaymentMethodsSheet(context),
-      ),
+      if (showCoordinatesAction)
+        _ProfileAction(
+          icon: Icons.account_balance_wallet_rounded,
+          title: 'Coordonnées',
+          subtitle: 'Coordonnées',
+          onTap: () => _showPaymentMethodsSheet(context),
+        ),
     ];
 
     final actionRows = <List<_ProfileAction>>[];

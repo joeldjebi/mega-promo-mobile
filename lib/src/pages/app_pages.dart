@@ -38,7 +38,7 @@ class SplashPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Prêt à jouer ?', style: AppTextStyles.titleLarge),
+                    Text('Prêt à découvrir ?', style: AppTextStyles.titleLarge),
                     const SizedBox(height: 16),
                     Text(
                       'Découvre les produits des marques, réponds aux quiz et cumule des points chaque jour.',
@@ -205,7 +205,7 @@ class OnboardingPage extends StatelessWidget {
               Text('Onboarding', style: AppTextStyles.titleLarge),
               const SizedBox(height: 12),
               Text(
-                'Configure ton pseudo et ton avatar pour commencer à jouer.',
+                'Configure ton pseudo et ton avatar pour commencer.',
                 style: AppTextStyles.bodyLarge,
               ),
               const Spacer(),

@@ -7,8 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../contests/models/contest.dart';
+import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/synced_clock_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import 'user_profile_provider.dart';
 
 class HomeBootstrapData {
@@ -49,6 +51,7 @@ void clearHomeBootstrapCache({String? userId, bool clearStored = false}) {
 final homeBootstrapProvider = FutureProvider.autoDispose<HomeBootstrapData>((
   ref,
 ) async {
+  ref.watch(appFeatureFlagsProvider);
   final keepAliveLink = ref.keepAlive();
   final cacheTimer = Timer(const Duration(seconds: 25), keepAliveLink.close);
   ref.onDispose(cacheTimer.cancel);
@@ -151,6 +154,7 @@ HomeBootstrapData _payloadToHomeBootstrapData(Map<String, dynamic> payload) {
         }
         return contest.status == 'active';
       })
+      .where(_isVisibleForAppStoreReview)
       .where((contest) => contest.isAccessibleForPlan(profile.planKey))
       .toList();
 
@@ -218,6 +222,7 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   var contests = const <Contest>[];
   try {
     contests = (await _fetchFallbackContests(supabase))
+        .where(_isVisibleForAppStoreReview)
         .where((contest) => contest.isAccessibleForPlan(profile.planKey))
         .toList();
   } catch (error, stackTrace) {
@@ -273,6 +278,12 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   _cachedHomeBootstrap = data;
   _cachedHomeBootstrapAt = DateTime.now();
   return data;
+}
+
+bool _isVisibleForAppStoreReview(Contest contest) {
+  if (!AppStoreReviewMode.hideRandomOrPredictionCampaigns) return true;
+  return contest.type != ContestType.tirage &&
+      contest.type != ContestType.pronostic;
 }
 
 Future<List<dynamic>> _selectRowsOrEmpty(

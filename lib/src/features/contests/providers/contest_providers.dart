@@ -6,8 +6,10 @@ import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/synced_clock_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../models/contest.dart';
 
 final categoriesProvider = FutureProvider<List<Category>>((ref) async {
@@ -28,6 +30,7 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
 });
 
 final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
+  ref.watch(appFeatureFlagsProvider);
   final supabase = ref.watch(supabaseProvider);
   final bootstrap = ref.watch(homeBootstrapProvider).value;
   final userPlanKey =
@@ -47,6 +50,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   if (bootstrapContests != null) {
     lastGoodContests = _sortContests(
       bootstrapContests
+          .where(_isVisibleForAppStoreReview)
           .where((contest) => contest.isAccessibleForPlan(userPlanKey))
           .where((contest) => !contest.isLive || contest.isLiveReady)
           .toList(),
@@ -116,9 +120,16 @@ Future<List<Contest>> _loadContestsSnapshot(
         if (contest.isLive) return contest.isLiveVisibleOnHome;
         return contest.status == 'active' && contest.endsAt.isAfter(now);
       })
+      .where(_isVisibleForAppStoreReview)
       .where((contest) => contest.isAccessibleForPlan(userPlanKey))
       .toList();
   return _sortContests(contests);
+}
+
+bool _isVisibleForAppStoreReview(Contest contest) {
+  if (!AppStoreReviewMode.hideRandomOrPredictionCampaigns) return true;
+  return contest.type != ContestType.tirage &&
+      contest.type != ContestType.pronostic;
 }
 
 List<Contest> _sortContests(List<Contest> contests) {

@@ -10,6 +10,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/live_quiz_notification_service.dart';
 import '../../../services/synced_clock_service.dart';
@@ -883,5 +884,8 @@ String _formatDuration(Duration duration) {
 }
 
 String _formatPrize(num value) {
+  if (AppStoreReviewMode.hideCashAmounts) {
+    return 'Récompense partenaire';
+  }
   return formatCurrencyAmount(value, zeroLabel: 'Récompense surprise');
 }

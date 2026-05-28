@@ -9,6 +9,7 @@ import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 
+import '../../../config/app_store_review_mode.dart';
 import '../models/contest.dart';
 import '../providers/contest_providers.dart';
 import '../services/contest_asset_preload_service.dart';
@@ -880,6 +881,9 @@ class _ContestLoadError extends StatelessWidget {
 }
 
 String _formatPrize(num value) {
+  if (AppStoreReviewMode.hideCashAmounts) {
+    return 'Récompense partenaire';
+  }
   return formatCurrencyAmount(value);
 }
 
@@ -891,6 +895,11 @@ String _shortDateTime(DateTime date) {
 }
 
 String _winnerText(Contest contest) {
+  if (AppStoreReviewMode.enabled) {
+    return contest.winnersCount > 1
+        ? '${contest.winnersCount} récompenses'
+        : '1 récompense';
+  }
   return contest.winnersCount > 1
       ? '${contest.winnersCount} lauréats'
       : '1 lauréat';

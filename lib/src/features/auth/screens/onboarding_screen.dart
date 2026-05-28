@@ -288,7 +288,7 @@ class _OnboardingAvatarScreenState
                 ),
               ),
               AppButton(
-                text: 'Commencer à jouer !',
+                text: 'Commencer',
                 isLoading: _isSaving,
                 onPressed: _selectedAvatar != null && !_isSaving
                     ? _startPlaying

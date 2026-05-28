@@ -12,6 +12,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../config/app_store_review_mode.dart';
 import '../../app_update/services/app_update_service.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../contests/models/contest.dart';
@@ -1909,6 +1910,9 @@ class _ContestErrorState extends StatelessWidget {
 }
 
 String _formatPrize(num value) {
+  if (AppStoreReviewMode.hideCashAmounts) {
+    return 'Récompense partenaire';
+  }
   return formatCurrencyAmount(value);
 }
 
@@ -1920,6 +1924,11 @@ String _shortDateTime(DateTime date) {
 }
 
 String _winnerText(Contest contest) {
+  if (AppStoreReviewMode.enabled) {
+    return contest.winnersCount > 1
+        ? '${contest.winnersCount} récompenses'
+        : '1 récompense';
+  }
   return contest.winnersCount > 1
       ? '${contest.winnersCount} vainqueurs'
       : '1 vainqueur';
