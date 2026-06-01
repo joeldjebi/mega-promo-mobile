@@ -9,6 +9,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/app_logger.dart';
 import '../../../services/fcm_service.dart';
 import '../services/auth_profile_service.dart';
 import '../utils/app_review_auth.dart';
@@ -211,11 +212,34 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         user,
         phone: user.phone ?? _phone,
       );
+      unawaited(
+        AppLogger.info(
+          'auth',
+          'otp_verified',
+          'Connexion joueur reussie par OTP.',
+          metadata: {
+            'route': nextRoute,
+            'provider': 'phone',
+          },
+        ),
+      );
       unawaited(FcmService.syncTokenForCurrentUser(force: true));
 
       if (!mounted) return;
       context.go(nextRoute);
     } on AuthException catch (error) {
+      unawaited(
+        AppLogger.warning(
+          'auth',
+          'otp_verify_failed',
+          'Echec verification OTP.',
+          metadata: {
+            'code': error.code,
+            'status_code': error.statusCode,
+            'message': error.message,
+          },
+        ),
+      );
       authLogError('verifyOTP', {
         'message': error.message,
         'statusCode': error.statusCode,
@@ -232,6 +256,15 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
     } catch (error, stackTrace) {
+      unawaited(
+        AppLogger.error(
+          'auth',
+          'otp_verify_error',
+          'Erreur inattendue pendant la verification OTP.',
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       authLogError('verifyOTP', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -290,11 +323,28 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         user,
         phone: _phone,
       );
+      unawaited(
+        AppLogger.info(
+          'auth',
+          'app_review_otp_verified',
+          'Connexion reviewer reussie.',
+          metadata: {'route': nextRoute},
+        ),
+      );
       unawaited(FcmService.syncTokenForCurrentUser(force: true));
 
       if (!mounted) return;
       context.go(nextRoute);
     } catch (error, stackTrace) {
+      unawaited(
+        AppLogger.error(
+          'auth',
+          'app_review_otp_failed',
+          'Echec connexion reviewer.',
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       authLogError('verifyOTPReview', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -314,6 +364,14 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 
       await Supabase.instance.client.auth.signInWithOtp(phone: _phone);
       authLogResponse('resendOtp', {'success': true});
+      unawaited(
+        AppLogger.info(
+          'auth',
+          'otp_resent',
+          'Nouveau code OTP demande.',
+          metadata: {'provider': 'phone'},
+        ),
+      );
 
       for (final controller in _controllers) {
         controller.clear();
@@ -329,6 +387,18 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         SnackBar(content: Text('Nouveau code envoyé au $_phone.')),
       );
     } on AuthException catch (error) {
+      unawaited(
+        AppLogger.warning(
+          'auth',
+          'otp_resend_failed',
+          'Echec demande nouveau code OTP.',
+          metadata: {
+            'code': error.code,
+            'status_code': error.statusCode,
+            'message': error.message,
+          },
+        ),
+      );
       authLogError('resendOtp', {
         'message': error.message,
         'statusCode': error.statusCode,
@@ -346,6 +416,15 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         ),
       );
     } catch (error, stackTrace) {
+      unawaited(
+        AppLogger.error(
+          'auth',
+          'otp_resend_error',
+          'Erreur inattendue pendant le renvoi OTP.',
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       authLogError('resendOtp', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

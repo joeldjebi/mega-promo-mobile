@@ -321,6 +321,8 @@ class _FilterChipButton extends StatelessWidget {
 
 String _contestBadgeLabel(Contest contest) {
   if (contest.isLiveActiveNow) return 'En direct';
+  if (contest.isLiveWaitingStatus) return 'Prochain QL';
+  if (contest.isLiveQueued) return 'En attente';
   if (contest.isLive) return 'À venir';
   return _contestCategoryLabel(contest);
 }
@@ -341,11 +343,13 @@ String _contestAudienceLabel(Contest contest) {
 }
 
 DateTime _contestCountdownTarget(Contest contest) {
+  final liveStartsAt = contest.liveStartsAt;
   if (contest.isLive &&
       !contest.isLiveActiveNow &&
       !contest.isLiveEnded &&
-      contest.liveStartsAt != null) {
-    return contest.liveStartsAt!;
+      liveStartsAt != null &&
+      DateTime.now().isBefore(liveStartsAt)) {
+    return liveStartsAt;
   }
   return contest.computedLiveEndsAt;
 }
@@ -418,8 +422,9 @@ class _ListContestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isEndedLive = contest.isLiveEnded;
+    final isDisabledLive = isEndedLive || contest.isLiveQueued;
     return Opacity(
-      opacity: isEndedLive ? 0.58 : 1,
+      opacity: isDisabledLive ? 0.62 : 1,
       child: AppCard(
         onTap: isEndedLive
             ? null
@@ -431,7 +436,7 @@ class _ListContestCard extends StatelessWidget {
         borderRadius: 18,
         child: Row(
           children: [
-            _ContestIcon(contest: contest, size: 44, muted: isEndedLive),
+            _ContestIcon(contest: contest, size: 44, muted: isDisabledLive),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -444,6 +449,8 @@ class _ListContestCard extends StatelessWidget {
                     style: AppTextStyles.h3.copyWith(
                       color: isEndedLive
                           ? AppColors.textSecondary
+                          : contest.isLiveQueued
+                          ? AppColors.textSecondary
                           : AppColors.textPrimary,
                       fontSize: 15,
                     ),
@@ -452,7 +459,9 @@ class _ListContestCard extends StatelessWidget {
                   Text(
                     _formatPrize(contest.prizeValue),
                     style: AppTextStyles.price.copyWith(
-                      color: isEndedLive ? AppColors.textHint : AppColors.gold,
+                      color: isDisabledLive
+                          ? AppColors.textHint
+                          : AppColors.gold,
                       fontSize: 14,
                     ),
                   ),
@@ -525,8 +534,9 @@ class _GridContestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isEndedLive = contest.isLiveEnded;
+    final isDisabledLive = isEndedLive || contest.isLiveQueued;
     return Opacity(
-      opacity: isEndedLive ? 0.58 : 1,
+      opacity: isDisabledLive ? 0.62 : 1,
       child: AppCard(
         onTap: isEndedLive
             ? null
@@ -541,7 +551,7 @@ class _GridContestCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                _ContestIcon(contest: contest, size: 40, muted: isEndedLive),
+                _ContestIcon(contest: contest, size: 40, muted: isDisabledLive),
                 const Spacer(),
                 if (isEndedLive)
                   const _EndedLiveBadge(compact: true)
@@ -562,6 +572,8 @@ class _GridContestCard extends StatelessWidget {
               style: AppTextStyles.h3.copyWith(
                 color: isEndedLive
                     ? AppColors.textSecondary
+                    : contest.isLiveQueued
+                    ? AppColors.textSecondary
                     : AppColors.textPrimary,
                 fontSize: 14,
               ),
@@ -572,7 +584,7 @@ class _GridContestCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTextStyles.price.copyWith(
-                color: isEndedLive ? AppColors.textHint : AppColors.gold,
+                color: isDisabledLive ? AppColors.textHint : AppColors.gold,
                 fontSize: 14,
               ),
             ),

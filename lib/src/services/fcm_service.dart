@@ -12,6 +12,7 @@ import '../../firebase_options.dart';
 import '../features/profile/providers/player_payment_methods_provider.dart';
 import '../features/rewards/providers/rewards_provider.dart';
 import 'app_telemetry_service.dart';
+import 'app_logger.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
@@ -76,9 +77,9 @@ class FcmService {
       return;
     }
 
-    final user = Supabase.instance.client.auth.currentUser;
+    final user = Supabase.instance.client.auth.currentSession?.user;
     if (user == null) {
-      debugPrint('[FCM][sync] skipped: no authenticated user');
+      debugPrint('[FCM][sync] skipped: no active authenticated session');
       _cancelSyncRetry();
       await _stopInAppNotifications();
       return;
@@ -120,10 +121,34 @@ class FcmService {
           .eq('id', user.id);
       _cancelSyncRetry();
       debugPrint('[FCM][sync] token synced for user=${_idPreview(user.id)}');
+      unawaited(
+        AppLogger.info(
+          'push',
+          'fcm_token_synced',
+          'Token FCM enregistre pour le joueur.',
+          metadata: {
+            'platform': _platformKey(),
+            'token_preview': _tokenPreview(token),
+            'force': force,
+          },
+        ),
+      );
     } catch (error, stackTrace) {
       debugPrint('[FCM][sync] token sync failed: $error');
       debugPrint('$stackTrace');
       _scheduleSyncRetry(force: force);
+      unawaited(
+        AppLogger.warning(
+          'push',
+          'fcm_token_sync_failed',
+          'Echec enregistrement token FCM.',
+          metadata: {
+            'platform': _platformKey(),
+            'attempt': _syncRetryAttempt,
+            'error': error.toString(),
+          },
+        ),
+      );
       unawaited(
         AppTelemetryService.recordError(
           error,
@@ -209,7 +234,7 @@ class FcmService {
   static void _listenTokenRefresh() {
     _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) async {
-      final user = Supabase.instance.client.auth.currentUser;
+      final user = Supabase.instance.client.auth.currentSession?.user;
       if (user == null) return;
 
       try {
@@ -226,9 +251,31 @@ class FcmService {
             })
             .eq('id', user.id);
         debugPrint('[FCM][refresh] refreshed token synced');
+        unawaited(
+          AppLogger.info(
+            'push',
+            'fcm_token_refreshed',
+            'Token FCM rafraichi pour le joueur.',
+            metadata: {
+              'platform': _platformKey(),
+              'token_preview': _tokenPreview(token),
+            },
+          ),
+        );
       } catch (error, stackTrace) {
         debugPrint('[FCM][refresh] refreshed token sync failed: $error');
         debugPrint('$stackTrace');
+        unawaited(
+          AppLogger.warning(
+            'push',
+            'fcm_token_refresh_failed',
+            'Echec synchronisation token FCM rafraichi.',
+            metadata: {
+              'platform': _platformKey(),
+              'error': error.toString(),
+            },
+          ),
+        );
         unawaited(
           AppTelemetryService.recordError(
             error,
@@ -255,6 +302,18 @@ class FcmService {
 
       debugPrint(
         '[FCM][message] foreground display skipped title=$title bodyLength=${body.length}',
+      );
+      unawaited(
+        AppLogger.info(
+          'push',
+          'foreground_message_received',
+          'Notification push recue en foreground.',
+          metadata: {
+            'message_id': message.messageId,
+            'type': message.data['type'],
+            'has_notification': notification != null,
+          },
+        ),
       );
     });
   }
@@ -292,6 +351,16 @@ class FcmService {
             if (type == 'kyc') {
               _invalidateKycState();
             }
+            unawaited(
+              AppLogger.info(
+                'notifications',
+                'in_app_notification_received',
+                'Notification in-app recue.',
+                entityType: 'notification',
+                entityId: notification['id'] as String?,
+                metadata: {'type': type},
+              ),
+            );
             _openNotificationRecordTarget(notification);
           },
         )

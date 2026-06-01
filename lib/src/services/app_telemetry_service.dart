@@ -6,21 +6,48 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AppTelemetryService {
   AppTelemetryService._();
 
   static bool _isEnabled = false;
+  static bool _isSentryEnabled = false;
   static final Map<String, Object> _context = <String, Object>{};
 
-  static Future<void> initialize({required bool firebaseReady}) async {
-    _isEnabled = firebaseReady && Firebase.apps.isNotEmpty;
-    if (!_isEnabled) {
-      debugPrint('[TELEMETRY][init] disabled: Firebase unavailable');
-      return;
-    }
+  static const String _sentryDsn = String.fromEnvironment('SENTRY_DSN');
+  static const String _sentryEnvironment = String.fromEnvironment(
+    'SENTRY_ENVIRONMENT',
+    defaultValue: 'production',
+  );
+  static const String _sentryTracesSampleRateValue = String.fromEnvironment(
+    'SENTRY_TRACES_SAMPLE_RATE',
+    defaultValue: '0.1',
+  );
+  static const List<String> _sensitiveKeyFragments = <String>[
+    'otp',
+    'password',
+    'passcode',
+    'pin',
+    'token',
+    'authorization',
+    'fcm',
+    'document',
+    'identity',
+    'secret',
+    'api_key',
+    'apikey',
+    'phone',
+    'email',
+    'msisdn',
+    'mobile_money',
+    'payment_number',
+    'account_number',
+  ];
 
+  static Future<void> initialize({required bool firebaseReady}) async {
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
       unawaited(recordFlutterFatal(details));
@@ -30,6 +57,21 @@ class AppTelemetryService {
       unawaited(recordFatal(error, stackTrace, reason: 'platform_dispatcher'));
       return true;
     };
+
+    await _initializeSentry();
+    _isEnabled = firebaseReady && Firebase.apps.isNotEmpty;
+    if (!_isEnabled) {
+      debugPrint('[TELEMETRY][init] Firebase disabled; Sentry only if configured');
+      await setContext(<String, Object>{
+        'build_mode': kReleaseMode
+            ? 'release'
+            : kProfileMode
+            ? 'profile'
+            : 'debug',
+        'platform': defaultTargetPlatform.name,
+      });
+      return;
+    }
 
     await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
       !kDebugMode,
@@ -47,6 +89,11 @@ class AppTelemetryService {
   }
 
   static Future<void> setUser(String? userId) async {
+    if (_isSentryEnabled) {
+      await Sentry.configureScope((scope) async {
+        await scope.setUser(userId == null ? null : SentryUser(id: userId));
+      });
+    }
     if (!_isEnabled) return;
     await FirebaseCrashlytics.instance.setUserIdentifier(userId ?? '');
     await FirebaseAnalytics.instance.setUserId(id: userId);
@@ -69,6 +116,13 @@ class AppTelemetryService {
   static Future<void> setContext(Map<String, Object?> values) async {
     final sanitized = _sanitize(values);
     _context.addAll(sanitized);
+    if (_isSentryEnabled) {
+      await Sentry.configureScope((scope) async {
+        for (final entry in sanitized.entries) {
+          await scope.setTag(entry.key, entry.value.toString());
+        }
+      });
+    }
     if (!_isEnabled) return;
     for (final entry in sanitized.entries) {
       try {
@@ -102,6 +156,13 @@ class AppTelemetryService {
       return;
     }
 
+    if (_isSentryEnabled) {
+      await _captureSentryException(
+        details.exception,
+        details.stack,
+        reason: 'flutter_fatal',
+      );
+    }
     if (!_isEnabled) {
       debugPrint('[TELEMETRY][flutter_fatal] ${details.exceptionAsString()}');
       return;
@@ -136,6 +197,17 @@ class AppTelemetryService {
 
     await setContext(context);
     debugPrint('[TELEMETRY][fatal] ${reason ?? 'fatal'} $error');
+    if (_isSentryEnabled) {
+      await _captureSentryException(
+        error,
+        stackTrace,
+        reason: reason ?? 'fatal',
+        context: <String, Object?>{
+          ...context,
+          'fatal': true,
+        },
+      );
+    }
     if (!_isEnabled) return;
     try {
       await FirebaseCrashlytics.instance.recordError(
@@ -158,6 +230,14 @@ class AppTelemetryService {
   }) async {
     await setContext(context);
     debugPrint('[TELEMETRY][error] ${reason ?? 'non_fatal'} $error');
+    if (_isSentryEnabled) {
+      await _captureSentryException(
+        error,
+        stackTrace,
+        reason: reason ?? 'non_fatal',
+        context: context,
+      );
+    }
     if (!_isEnabled) return;
     try {
       await FirebaseCrashlytics.instance.recordError(
@@ -277,16 +357,95 @@ class AppTelemetryService {
       final key = entry.key.trim();
       final value = entry.value;
       if (key.isEmpty || value == null) continue;
+      if (_isSensitiveKey(key)) continue;
       if (value is num || value is bool || value is String) {
-        sanitized[key] = value is String && value.length > 96
-            ? value.substring(0, 96)
-            : value;
+        final sanitizedValue = value is String ? _maskSensitiveText(value) : value;
+        sanitized[key] = sanitizedValue is String && sanitizedValue.length > 96
+            ? sanitizedValue.substring(0, 96)
+            : sanitizedValue;
       } else {
         final text = value.toString();
         sanitized[key] = text.length > 96 ? text.substring(0, 96) : text;
       }
     }
     return sanitized;
+  }
+
+  static String _maskSensitiveText(String value) {
+    if (RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
+      final parts = value.split('@');
+      final visibleLength = parts.first.length < 2 ? parts.first.length : 2;
+      return '${parts.first.substring(0, visibleLength)}***@${parts.last}';
+    }
+
+    final compact = value.replaceAll(RegExp(r'\s+'), '');
+    if (RegExp(r'^\+?[0-9]{8,16}$').hasMatch(compact)) {
+      if (compact.length <= 6) return compact;
+      return '${compact.substring(0, 6)}******${compact.substring(compact.length - 2)}';
+    }
+
+    return value;
+  }
+
+  static bool _isSensitiveKey(String key) {
+    final normalizedKey = key
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return _sensitiveKeyFragments.any(normalizedKey.contains);
+  }
+
+  static Future<void> _initializeSentry() async {
+    if (_sentryDsn.trim().isEmpty) {
+      debugPrint('[SENTRY][init] disabled: SENTRY_DSN missing');
+      return;
+    }
+
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      await SentryFlutter.init((options) {
+        options.dsn = _sentryDsn;
+        options.environment = _sentryEnvironment;
+        options.release =
+            'mega_promo@${packageInfo.version}+${packageInfo.buildNumber}';
+        options.tracesSampleRate = (double.tryParse(
+                  _sentryTracesSampleRateValue,
+                ) ??
+                0.1)
+            .clamp(0, 1)
+            .toDouble();
+        options.sendDefaultPii = false;
+      });
+      _isSentryEnabled = true;
+      debugPrint('[SENTRY][init] ready');
+    } catch (error) {
+      debugPrint('[SENTRY][init_failed] $error');
+    }
+  }
+
+  static Future<void> _captureSentryException(
+    Object error,
+    StackTrace? stackTrace, {
+    required String reason,
+    Map<String, Object?> context = const <String, Object?>{},
+  }) async {
+    try {
+      await Sentry.captureException(
+        error,
+        stackTrace: stackTrace,
+        withScope: (scope) async {
+          await scope.setTag('reason', reason);
+          for (final entry in _sanitize(<String, Object?>{
+            ..._context,
+            ...context,
+          }).entries) {
+            await scope.setTag(entry.key, entry.value.toString());
+          }
+        },
+      );
+    } catch (sentryError) {
+      debugPrint('[SENTRY][capture_failed] $sentryError');
+    }
   }
 
   static Iterable<Object> _information(Map<String, Object?> context) {

@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/app_logger.dart';
 import '../../../services/live_quiz_notification_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../contests/providers/contest_providers.dart';
@@ -125,8 +126,9 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     if (!mounted) return;
 
     final syncedNow = SyncedClockService.now();
-    final elapsedInCurrentSecond =
-        syncedNow.millisecondsSinceEpoch.remainder(1000);
+    final elapsedInCurrentSecond = syncedNow.millisecondsSinceEpoch.remainder(
+      1000,
+    );
     final delayMs = elapsedInCurrentSecond == 0
         ? 1000
         : 1000 - elapsedInCurrentSecond;
@@ -187,6 +189,8 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
 
   Future<void> _joinWaitingRoom() async {
     if (_isJoining) return;
+    final detail = ref.read(contestDetailProvider(widget.contestId)).value;
+    if (detail != null && !detail.contest.isLiveReservationOpen) return;
     setState(() => _isJoining = true);
 
     try {
@@ -195,6 +199,16 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
         params: {'p_contest_id': widget.contestId},
       );
       _hasJoinedWaitingRoom = true;
+      unawaited(
+        AppLogger.info(
+          'live_quiz',
+          'join_waiting_room',
+          'Joueur entre dans la salle attente QL.',
+          entityType: 'contest',
+          entityId: widget.contestId,
+          metadata: {'connection_quality': _connectionQuality},
+        ),
+      );
       _recomputeConnectionQuality();
       clearContestDetailCache(widget.contestId);
       ref.invalidate(contestDetailProvider(widget.contestId));
@@ -203,6 +217,21 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
         _lastNetworkIssueAt = DateTime.now();
         _recomputeConnectionQuality();
       }
+      unawaited(
+        AppLogger.warning(
+          'live_quiz',
+          'join_waiting_room_failed',
+          'Echec entree salle attente QL.',
+          entityType: 'contest',
+          entityId: widget.contestId,
+          metadata: {
+            'retryable_network': AppTelemetryService.isRetryableNetworkError(
+              error,
+            ),
+            'error': error.toString(),
+          },
+        ),
+      );
       // The screen still acts as the waiting surface if the player is already in
       // the room or if the server window just changed while navigating.
     } finally {
@@ -269,11 +298,22 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
       return;
     }
 
-    if (!detail.contest.isLiveReady || !detail.contest.isLiveActiveNow) {
+    final liveStartsAt = detail.contest.liveStartsAt;
+    final canAttemptStart =
+        detail.contest.isLiveActiveNow ||
+        (detail.contest.isLiveWaitingStatus &&
+            liveStartsAt != null &&
+            !SyncedClockService.now().isBefore(liveStartsAt));
+
+    if (!detail.contest.isLiveReady || !canAttemptStart) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('L’arène du Quiz Live se prépare. Reviens vite.'),
+        SnackBar(
+          content: Text(
+            detail.contest.isLiveQueued
+                ? 'Ce Quiz Live est dans la file d’attente.'
+                : 'L’arène du Quiz Live se prépare. Reviens vite.',
+          ),
         ),
       );
       return;
@@ -539,10 +579,9 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
                                     textAlign: TextAlign.center,
                                     maxLines: isVeryTight ? 2 : 3,
                                     overflow: TextOverflow.ellipsis,
-                                    style: AppTextStyles.bodySecondary
-                                        .copyWith(
-                                          fontSize: isVeryTight ? 11 : 12,
-                                        ),
+                                    style: AppTextStyles.bodySecondary.copyWith(
+                                      fontSize: isVeryTight ? 11 : 12,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 10),

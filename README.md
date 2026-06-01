@@ -2,6 +2,20 @@
 
 A new Flutter project.
 
+## Observability
+
+Sentry is optional and enabled only when a DSN is provided at build time:
+
+```sh
+flutter run \
+  --dart-define=SENTRY_DSN=https://example.ingest.sentry.io/project \
+  --dart-define=SENTRY_ENVIRONMENT=production \
+  --dart-define=SENTRY_TRACES_SAMPLE_RATE=0.1
+```
+
+Crashlytics remains active when Firebase is available. Sentry receives the same
+fatal and non-fatal errors through `AppTelemetryService`.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

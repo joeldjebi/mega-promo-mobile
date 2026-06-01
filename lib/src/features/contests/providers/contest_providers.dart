@@ -84,10 +84,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
         authLogResponse('contestsStream', {'count': rows.length});
         await _processLiveQuizEvents(supabase);
         try {
-          lastGoodContests = await _loadContestsSnapshot(
-            supabase,
-            userPlanKey,
-          );
+          lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
           return lastGoodContests;
         } catch (error, stackTrace) {
           authLogError('contestsStreamSnapshot', error, stackTrace);
@@ -134,13 +131,32 @@ bool _isVisibleForAppStoreReview(Contest contest) {
 
 List<Contest> _sortContests(List<Contest> contests) {
   contests.sort((a, b) {
+    final liveRankCompare = _contestLiveRank(a).compareTo(_contestLiveRank(b));
+    if (liveRankCompare != 0) return liveRankCompare;
+
     final boostCompare = b.isBoosted.toString().compareTo(
       a.isBoosted.toString(),
     );
     if (boostCompare != 0) return boostCompare;
-    return (a.startsAt ?? a.endsAt).compareTo(b.startsAt ?? b.endsAt);
+    return _contestScheduleAt(a).compareTo(_contestScheduleAt(b));
   });
   return contests;
+}
+
+int _contestLiveRank(Contest contest) {
+  if (!contest.isLive) return 4;
+  if (contest.isLiveActiveNow) return 0;
+  if (contest.isLiveWaitingStatus) return 1;
+  if (contest.isLiveQueued) return 2;
+  if (contest.isLiveEnded) return 5;
+  return 3;
+}
+
+DateTime _contestScheduleAt(Contest contest) {
+  if (contest.isLive && contest.liveStartsAt != null) {
+    return contest.liveStartsAt!;
+  }
+  return contest.startsAt ?? contest.endsAt;
 }
 
 Future<void> _processLiveQuizEvents(dynamic supabase) async {

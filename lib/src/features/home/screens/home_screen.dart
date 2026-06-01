@@ -135,9 +135,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       body: Stack(
         children: [
-          const Positioned.fill(
-            child: ColoredBox(color: _homeBackgroundColor),
-          ),
+          const Positioned.fill(child: ColoredBox(color: _homeBackgroundColor)),
           Positioned(
             top: contentBackgroundTop,
             left: 0,
@@ -246,15 +244,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               ),
                             ),
                             const SizedBox(height: 16),
-                      ],
-                      if (liveQuizzes.isNotEmpty) ...[
-                        Text(
-                          'QUIZ LIVE',
-                          style: AppTextStyles.label.copyWith(
-                            color: _homeOnBackgroundColor,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
+                          ],
+                          if (liveQuizzes.isNotEmpty) ...[
+                            Text(
+                              'QUIZ LIVE',
+                              style: AppTextStyles.label.copyWith(
+                                color: _homeOnBackgroundColor,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
                             SizedBox(
                               height: 214,
                               child: LayoutBuilder(
@@ -1000,8 +998,9 @@ class _FeaturedContestCard extends StatelessWidget {
 
 int _liveQuizHomeRank(Contest contest) {
   if (contest.isLiveActiveNow) return 0;
-  if (contest.isLiveEnded) return 2;
-  return 1;
+  if (contest.isLiveWaitingStatus) return 1;
+  if (contest.isLiveEnded) return 3;
+  return 2;
 }
 
 class _LiveQuizCard extends StatelessWidget {
@@ -1020,15 +1019,26 @@ class _LiveQuizCard extends StatelessWidget {
     final liveStartsAt = contest.liveStartsAt;
     final isEnded = contest.isLiveEnded;
     final isActiveNow = contest.isLiveActiveNow;
+    final isWaiting = contest.isLiveWaitingStatus;
+    final isQueued = contest.isLiveQueued;
+    final isDisabledPreview = isEnded || isQueued;
     final statusColor = isEnded
         ? AppColors.textHint
         : isActiveNow
         ? AppColors.accentGreen
+        : isWaiting
+        ? AppColors.primary
+        : isQueued
+        ? AppColors.textHint
         : AppColors.primary;
     final statusText = isEnded
         ? 'TERMINÉ'
         : isActiveNow
         ? 'EN DIRECT'
+        : isWaiting
+        ? 'PROCHAIN QL'
+        : isQueued
+        ? 'EN ATTENTE'
         : 'À VENIR';
     final startsLabel = liveStartsAt == null
         ? 'Heure à confirmer'
@@ -1038,277 +1048,291 @@ class _LiveQuizCard extends StatelessWidget {
     return InkWell(
       onTap: isEnded ? null : () => context.push('/contests/${contest.id}'),
       borderRadius: BorderRadius.circular(24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isEnded ? AppColors.surface : AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: isEnded ? AppColors.textHint : statusColor,
-            width: 3,
-          ),
-          boxShadow: isEnded
-              ? const []
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.07),
-                    blurRadius: 18,
-                    offset: const Offset(0, 10),
-                  ),
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.08),
-                    blurRadius: 26,
-                    offset: const Offset(0, 14),
-                  ),
-                ],
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              right: 14,
-              top: 62,
-              child: Icon(
-                Icons.grid_4x4_rounded,
-                color: AppColors.primary.withValues(
-                  alpha: isEnded ? 0.04 : 0.08,
-                ),
-                size: 72,
-              ),
+      child: Opacity(
+        opacity: isDisabledPreview ? 0.68 : 1,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDisabledPreview
+                ? AppColors.surface
+                : AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isDisabledPreview ? AppColors.surfaceBorder : statusColor,
+              width: isDisabledPreview ? 1.5 : 3,
             ),
-            Padding(
-              padding: const EdgeInsets.all(13),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: statusColor.withValues(alpha: 0.26),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: statusColor,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              statusText,
-                              style: AppTextStyles.label.copyWith(
-                                color: statusColor,
-                                fontSize: 10.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (isRegistered)
-                        const _LiveRegisteredBadge()
-                      else if (hasParticipated)
-                        const _ParticipatedBadge(compact: true)
-                      else
-                        _CategoryBadge(label: _contestCategoryLabel(contest)),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.surfaceBorder),
-                        ),
-                        child: Text(
-                          startsLabel,
-                          style: AppTextStyles.h3.copyWith(
-                            color: isEnded
-                                ? AppColors.textSecondary
-                                : AppColors.primaryDark,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: isEnded
-                              ? AppColors.surfaceElevated.withValues(
-                                  alpha: 0.72,
-                                )
-                              : AppColors.accent,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: isEnded
-                                ? AppColors.textHint.withValues(alpha: 0.18)
-                                : AppColors.primary.withValues(alpha: 0.18),
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.sports_esports_rounded,
-                          color: isEnded
-                              ? AppColors.textHint
-                              : AppColors.primaryDark,
-                          size: 27,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              contest.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTextStyles.h2.copyWith(
-                                color: isEnded
-                                    ? AppColors.textSecondary
-                                    : AppColors.textPrimary,
-                                fontSize: 17,
-                                height: 1.15,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Row(
-                              children: [
-                                Flexible(
-                                  child: _LiveQuizMetaChip(
-                                    icon: Icons.workspace_premium_rounded,
-                                    label: _formatPrize(contest.prizeValue),
-                                    muted: isEnded,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                _LiveQuizMetaChip(
-                                  icon: Icons.groups_rounded,
-                                  label:
-                                      '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}',
-                                  muted: isEnded,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 9,
+            boxShadow: isDisabledPreview
+                ? const []
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.07),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
                     ),
-                    decoration: BoxDecoration(
-                      color: isEnded
-                          ? AppColors.surfaceElevated.withValues(alpha: 0.70)
-                          : AppColors.accent.withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(17),
-                      border: Border.all(
-                        color: isEnded
-                            ? AppColors.surfaceBorder
-                            : AppColors.primary.withValues(alpha: 0.16),
-                      ),
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      blurRadius: 26,
+                      offset: const Offset(0, 14),
                     ),
-                    child: Row(
+                  ],
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                right: 14,
+                top: 62,
+                child: Icon(
+                  Icons.grid_4x4_rounded,
+                  color: AppColors.primary.withValues(
+                    alpha: isDisabledPreview ? 0.025 : 0.08,
+                  ),
+                  size: 72,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(13),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Icon(
-                          isEnded
-                              ? Icons.history_toggle_off_rounded
-                              : Icons.timer_rounded,
-                          color: isEnded ? AppColors.textHint : AppColors.gold,
-                          size: 17,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: statusColor.withValues(alpha: 0.26),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: statusColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                statusText,
+                                style: AppTextStyles.label.copyWith(
+                                  color: statusColor,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: isEnded
-                              ? Text(
-                                  'Terminé',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                )
-                              : Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    liveStartsAt == null
-                                        ? Text(
-                                            'Départ bientôt',
-                                            style: AppTextStyles.bodySmall,
-                                          )
-                                        : _LiveQuizStartsCountdown(
-                                            startsAt: liveStartsAt,
-                                          ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppTextStyles.bodySmall.copyWith(
-                                        color: AppColors.textSecondary,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                        if (!isEnded) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 9,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceElevated,
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: AppColors.primary.withValues(
-                                  alpha: 0.16,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              isRegistered ? 'Entrer' : 'Réserver',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.primaryDark,
-                                fontWeight: FontWeight.w900,
-                              ),
+                        if (isRegistered)
+                          const _LiveRegisteredBadge()
+                        else if (hasParticipated)
+                          const _ParticipatedBadge(compact: true)
+                        else
+                          _CategoryBadge(label: _contestCategoryLabel(contest)),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.surfaceBorder),
+                          ),
+                          child: Text(
+                            startsLabel,
+                            style: AppTextStyles.h3.copyWith(
+                              color: isDisabledPreview
+                                  ? AppColors.textSecondary
+                                  : AppColors.primaryDark,
+                              fontSize: 13.5,
                             ),
                           ),
-                        ],
+                        ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: isDisabledPreview
+                                ? AppColors.surfaceElevated.withValues(
+                                    alpha: 0.72,
+                                  )
+                                : AppColors.accent,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: isDisabledPreview
+                                  ? AppColors.textHint.withValues(alpha: 0.18)
+                                  : AppColors.primary.withValues(alpha: 0.18),
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.sports_esports_rounded,
+                            color: isDisabledPreview
+                                ? AppColors.textHint
+                                : AppColors.primaryDark,
+                            size: 27,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                contest.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTextStyles.h2.copyWith(
+                                  color: isDisabledPreview
+                                      ? AppColors.textSecondary
+                                      : AppColors.textPrimary,
+                                  fontSize: 17,
+                                  height: 1.15,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: _LiveQuizMetaChip(
+                                      icon: Icons.workspace_premium_rounded,
+                                      label: _formatPrize(contest.prizeValue),
+                                      muted: isDisabledPreview,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _LiveQuizMetaChip(
+                                    icon: Icons.groups_rounded,
+                                    label:
+                                        '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}',
+                                    muted: isDisabledPreview,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 9,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDisabledPreview
+                            ? AppColors.surfaceElevated.withValues(alpha: 0.70)
+                            : AppColors.accent.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: isDisabledPreview
+                              ? AppColors.surfaceBorder
+                              : AppColors.primary.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isDisabledPreview
+                                ? Icons.history_toggle_off_rounded
+                                : Icons.timer_rounded,
+                            color: isDisabledPreview
+                                ? AppColors.textHint
+                                : AppColors.gold,
+                            size: 17,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: isEnded
+                                ? Text(
+                                    'Terminé',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.bodySmall.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  )
+                                : Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      liveStartsAt == null
+                                          ? Text(
+                                              'Départ bientôt',
+                                              style: AppTextStyles.bodySmall,
+                                            )
+                                          : _LiveQuizStartsCountdown(
+                                              startsAt: liveStartsAt,
+                                            ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: AppTextStyles.bodySmall.copyWith(
+                                          color: AppColors.textSecondary,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                          if (!isEnded) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceElevated,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: AppColors.primary.withValues(
+                                    alpha: 0.16,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                isDisabledPreview
+                                    ? 'Voir détails'
+                                    : isRegistered
+                                    ? 'Entrer'
+                                    : 'Réserver',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: isDisabledPreview
+                                      ? AppColors.textSecondary
+                                      : AppColors.primaryDark,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

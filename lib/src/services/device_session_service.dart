@@ -31,7 +31,7 @@ class DeviceSessionService {
 
   static Future<void> claimCurrentSession({bool force = false}) async {
     final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
+    final user = supabase.auth.currentSession?.user;
     if (user == null) return;
 
     try {
@@ -61,7 +61,7 @@ class DeviceSessionService {
     _isChecking = true;
     try {
       final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
+      final user = supabase.auth.currentSession?.user;
       if (user == null) return;
 
       final sessionId = await _getSessionId();

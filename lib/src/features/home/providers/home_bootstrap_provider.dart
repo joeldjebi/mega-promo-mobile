@@ -390,9 +390,16 @@ Future<List<Contest>> _fetchFallbackContests(dynamic supabase) async {
       a.isBoosted.toString(),
     );
     if (boostCompare != 0) return boostCompare;
-    return (a.startsAt ?? a.endsAt).compareTo(b.startsAt ?? b.endsAt);
+    return _contestScheduleAt(a).compareTo(_contestScheduleAt(b));
   });
   return contests;
+}
+
+DateTime _contestScheduleAt(Contest contest) {
+  if (contest.isLive && contest.liveStartsAt != null) {
+    return contest.liveStartsAt!;
+  }
+  return contest.startsAt ?? contest.endsAt;
 }
 
 Map<String, dynamic> _asMap(Object? value) {

@@ -238,19 +238,43 @@ class Contest {
   bool get isLiveEnded {
     final normalizedStatus = liveStatus.toLowerCase();
     final normalizedContestStatus = status.toLowerCase();
-    return isLive &&
-        (normalizedContestStatus == 'inactive' ||
-            normalizedContestStatus == 'ended' ||
-            normalizedContestStatus == 'completed' ||
-            normalizedContestStatus == 'finished' ||
-            normalizedStatus == 'ended' ||
-            normalizedStatus == 'completed' ||
-            normalizedStatus == 'finished' ||
-            !computedLiveEndsAt.isAfter(SyncedClockService.now()));
+    if (!isLive) return false;
+    if (normalizedContestStatus == 'inactive' ||
+        normalizedContestStatus == 'ended' ||
+        normalizedContestStatus == 'completed' ||
+        normalizedContestStatus == 'finished' ||
+        normalizedStatus == 'ended' ||
+        normalizedStatus == 'completed' ||
+        normalizedStatus == 'finished') {
+      return true;
+    }
+    if (!isLivePlayableStatus) return false;
+    return !computedLiveEndsAt.isAfter(SyncedClockService.now());
   }
 
   bool get isLiveReady =>
       !isLive || (liveQuestionsCount > 0 && liveDurationSeconds > 0);
+
+  bool get isLivePlayableStatus {
+    final normalizedStatus = liveStatus.toLowerCase();
+    return normalizedStatus == 'playing' ||
+        normalizedStatus == 'active' ||
+        normalizedStatus == 'open';
+  }
+
+  bool get isLiveWaitingStatus => liveStatus.toLowerCase() == 'waiting';
+
+  bool get isLiveReservationOpen {
+    if (!isLive || isLiveEnded) return false;
+    return isLiveWaitingStatus || isLiveActiveNow;
+  }
+
+  bool get isLiveQueued {
+    if (!isLive || isLiveEnded || isLiveActiveNow) return false;
+    final startsAt = liveStartsAt;
+    if (startsAt == null) return false;
+    return !isLivePlayableStatus && !isLiveWaitingStatus;
+  }
 
   DateTime get computedLiveEndsAt {
     if (!isLive) return endsAt;
@@ -262,6 +286,7 @@ class Contest {
 
   bool get isLiveActiveNow {
     if (!isLive || isLiveEnded) return false;
+    if (!isLivePlayableStatus) return false;
     final now = SyncedClockService.now();
     return liveStartsAt != null &&
         !now.isBefore(liveStartsAt!) &&

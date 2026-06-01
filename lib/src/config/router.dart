@@ -94,12 +94,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         final maintenanceRedirect = await _maintenanceRedirect(
           userId: currentUser.id,
           goingToMaintenance: goingToMaintenance,
-          maintenanceEnabled:
-              ref
-                  .read(appFeatureFlagsProvider)
-                  .asData
-                  ?.value
-                  .appMaintenanceEnabled,
+          maintenanceEnabled: ref
+              .read(appFeatureFlagsProvider)
+              .asData
+              ?.value
+              .appMaintenanceEnabled,
         );
         if (maintenanceRedirect != null) return maintenanceRedirect;
 
@@ -192,6 +191,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             participationId: extra['participationId'] as String? ?? '',
             questions: extra['questions'] as List<QuizQuestion>? ?? const [],
             answers: extra['answers'] as List<QuizAnswer>? ?? const [],
+            liveElapsedMs: extra['liveElapsedMs'] as int?,
           );
         },
       ),

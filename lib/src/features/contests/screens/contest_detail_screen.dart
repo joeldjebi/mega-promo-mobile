@@ -19,6 +19,7 @@ import '../../home/providers/user_profile_provider.dart';
 import '../../live_quiz/services/live_quiz_service.dart';
 import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/app_logger.dart';
 import '../../../services/live_quiz_notification_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
@@ -158,11 +159,7 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
       if (DateTime.now().difference(_openedAt) < const Duration(seconds: 3)) {
         return;
       }
-      const ignoredKeys = {
-        'views_count',
-        'unique_views_count',
-        'updated_at',
-      };
+      const ignoredKeys = {'views_count', 'unique_views_count', 'updated_at'};
       if (!_hasMeaningfulRealtimeChange(payload, ignoredKeys: ignoredKeys)) {
         return;
       }
@@ -381,17 +378,18 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       !data.contest.isAccessibleForPlan(data.userProfile.planKey);
 
   bool get _isWaitingRoomOpen {
+    if (!data.contest.isLiveReservationOpen) return false;
     final liveStartsAt = data.contest.liveStartsAt;
     if (liveStartsAt == null) return false;
     return SyncedClockService.now().isBefore(liveStartsAt);
   }
 
   bool get _canStartLiveQuiz {
+    if (data.contest.isLiveActiveNow) return true;
     final liveStartsAt = data.contest.liveStartsAt;
-    if (liveStartsAt == null) return false;
-    final now = SyncedClockService.now();
-    return !now.isBefore(liveStartsAt) &&
-        now.isBefore(data.contest.computedLiveEndsAt);
+    return data.contest.isLiveWaitingStatus &&
+        liveStartsAt != null &&
+        !SyncedClockService.now().isBefore(liveStartsAt);
   }
 
   bool get _isLiveRegisteredAndWaiting =>
@@ -404,6 +402,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   bool get _isActionDisabled =>
       _planAccessDenied ||
       (data.contest.isLive && !data.contest.isLiveReady) ||
+      (data.contest.isLive && !data.contest.isLiveReservationOpen) ||
       data.contest.isLiveEnded ||
       _isLiveRegisteredAndWaiting;
 
@@ -412,6 +411,11 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     if (data.contest.isLive) {
       if (!data.contest.isLiveReady) return 'Arène en préparation';
       if (data.contest.isLiveEnded) return 'Quiz Live terminé';
+      if (!data.contest.isLiveReservationOpen) {
+        return data.contest.isLiveQueued
+            ? 'En attente du QL précédent'
+            : 'Quiz Live programmé';
+      }
       if (!data.hasLiveRegistration) return 'Réserver ma place';
       if (_isWaitingRoomOpen) return 'Entrer en salle d’attente';
       if (_canStartLiveQuiz) return 'Démarrer le Quiz Live';
@@ -500,12 +504,40 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         return;
       }
 
+      if (!data.contest.isLiveReservationOpen) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              data.contest.isLiveQueued
+                  ? 'Ce Quiz Live est programmé. Il sera activé automatiquement quand son tour arrivera.'
+                  : 'Ce Quiz Live n’est pas encore ouvert.',
+            ),
+          ),
+        );
+        await stopLoading();
+        return;
+      }
+
       final supabase = Supabase.instance.client;
       try {
         if (!data.hasLiveRegistration) {
           await supabase.rpc(
             'register_live_quiz',
             params: {'p_contest_id': data.contest.id},
+          );
+          unawaited(
+            AppLogger.info(
+              'live_quiz',
+              'register',
+              'Joueur inscrit au Quiz Live.',
+              entityType: 'contest',
+              entityId: data.contest.id,
+              metadata: {
+                'contest_title': data.contest.title,
+                'live_starts_at': data.contest.liveStartsAt?.toIso8601String(),
+                'registered_count': data.contest.registeredCount + 1,
+              },
+            ),
           );
           await supabase.rpc(
             'join_live_quiz_waiting_room',
@@ -536,6 +568,16 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             'join_live_quiz_waiting_room',
             params: {'p_contest_id': data.contest.id},
           );
+          unawaited(
+            AppLogger.info(
+              'live_quiz',
+              'open_waiting_room',
+              'Joueur ouvre la salle attente QL depuis le detail.',
+              entityType: 'contest',
+              entityId: data.contest.id,
+              metadata: {'contest_title': data.contest.title},
+            ),
+          );
           _refreshParticipationState(ref);
           if (!context.mounted) return;
           context.go('/contests/${data.contest.id}/live-waiting');
@@ -559,6 +601,22 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           ),
         );
       } catch (error, stackTrace) {
+        unawaited(
+          AppLogger.warning(
+            'live_quiz',
+            'action_failed',
+            'Action Quiz Live impossible depuis le detail.',
+            entityType: 'contest',
+            entityId: data.contest.id,
+            metadata: {
+              'contest_title': data.contest.title,
+              'retryable_network': AppTelemetryService.isRetryableNetworkError(
+                error,
+              ),
+              'error': error.toString(),
+            },
+          ),
+        );
         unawaited(
           AppTelemetryService.recordError(
             error,
@@ -603,6 +661,20 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             .select('id')
             .single();
 
+        unawaited(
+          AppLogger.info(
+            'contests',
+            'start_quiz_contest',
+            'Joueur demarre un quiz concours.',
+            entityType: 'contest',
+            entityId: data.contest.id,
+            metadata: {
+              'contest_title': data.contest.title,
+              'participation_id': participation['id'] as String?,
+            },
+          ),
+        );
+
         await supabase
             .from('users')
             .update({
@@ -619,7 +691,18 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           '/contests/${data.contest.id}/quiz',
           extra: {'participationId': participation['id'] as String},
         );
-      } catch (_) {
+      } catch (error, stackTrace) {
+        unawaited(
+          AppLogger.error(
+            'contests',
+            'start_quiz_contest_failed',
+            'Echec demarrage quiz concours.',
+            entityType: 'contest',
+            entityId: data.contest.id,
+            error: error,
+            stackTrace: stackTrace,
+          ),
+        );
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1309,8 +1392,33 @@ class _DrawParticipationSheetState
       clearContestDetailCache(widget.data.contest.id);
       widget.ref.invalidate(contestDetailProvider(widget.data.contest.id));
 
+      unawaited(
+        AppLogger.info(
+          'contests',
+          'draw_participation',
+          'Participation tirage enregistree.',
+          entityType: 'contest',
+          entityId: widget.data.contest.id,
+          metadata: {
+            'contest_title': widget.data.contest.title,
+            'tickets': tickets,
+          },
+        ),
+      );
+
       if (mounted) setState(() => _isDone = true);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      unawaited(
+        AppLogger.error(
+          'contests',
+          'draw_participation_failed',
+          'Echec participation tirage.',
+          entityType: 'contest',
+          entityId: widget.data.contest.id,
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Participation impossible. Réessaie.')),
@@ -1544,13 +1652,39 @@ class _PredictionParticipationSheetState
       clearContestDetailCache(widget.data.contest.id);
       widget.ref.invalidate(contestDetailProvider(widget.data.contest.id));
 
+      unawaited(
+        AppLogger.info(
+          'contests',
+          'prediction_participation',
+          'Participation pronostic enregistree.',
+          entityType: 'contest',
+          entityId: widget.data.contest.id,
+          metadata: {
+            'contest_title': widget.data.contest.title,
+            'prediction_type': prediction.kind.storageKey,
+            'match': prediction.matchLabel,
+          },
+        ),
+      );
+
       if (mounted) {
         setState(() {
           _doneSummary = predictionAnswer.summary;
           _isDone = true;
         });
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      unawaited(
+        AppLogger.error(
+          'contests',
+          'prediction_participation_failed',
+          'Echec participation pronostic.',
+          entityType: 'contest',
+          entityId: widget.data.contest.id,
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Réponse impossible. Réessaie.')),
@@ -1590,10 +1724,7 @@ class _PredictionParticipationSheetState
             : 'predicted_assist_provider';
         return _PredictionAnswer(
           summary: '${prediction.prompt} $player',
-          answers: {
-            answerKey: player,
-            'selected_player': player,
-          },
+          answers: {answerKey: player, 'selected_player': player},
         );
       case FootballPredictionKind.startingEleven:
         final requiredCount = prediction.maxSelections;
@@ -1606,7 +1737,8 @@ class _PredictionParticipationSheetState
         }
         final players = _selectedPlayers.toList(growable: false);
         return _PredictionAnswer(
-          summary: 'Ton XI titulaire est enregistre (${players.length}/$requiredCount).',
+          summary:
+              'Ton XI titulaire est enregistre (${players.length}/$requiredCount).',
           answers: {
             'predicted_starting_eleven': players,
             'selected_players': players,
@@ -1945,7 +2077,8 @@ class _StartingElevenPredictionForm extends StatelessWidget {
   final ContestPrediction prediction;
   final bool enabled;
   final Set<String> selectedPlayers;
-  final void Function(String player, ContestPrediction prediction) onTogglePlayer;
+  final void Function(String player, ContestPrediction prediction)
+  onTogglePlayer;
 
   const _StartingElevenPredictionForm({
     required this.prediction,
@@ -1973,17 +2106,19 @@ class _StartingElevenPredictionForm extends StatelessWidget {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: prediction.players.map((player) {
-            return _PredictionChoiceChip(
-              label: player,
-              selected: selectedPlayers.contains(player),
-              enabled:
-                  enabled &&
-                  (selectedPlayers.contains(player) ||
-                      selectedPlayers.length < prediction.maxSelections),
-              onTap: () => onTogglePlayer(player, prediction),
-            );
-          }).toList(growable: false),
+          children: prediction.players
+              .map((player) {
+                return _PredictionChoiceChip(
+                  label: player,
+                  selected: selectedPlayers.contains(player),
+                  enabled:
+                      enabled &&
+                      (selectedPlayers.contains(player) ||
+                          selectedPlayers.length < prediction.maxSelections),
+                  onTap: () => onTogglePlayer(player, prediction),
+                );
+              })
+              .toList(growable: false),
         ),
       ],
     );
@@ -2258,10 +2393,7 @@ class _ContestBrandLogoLine extends StatelessWidget {
   final Contest contest;
   final bool fillWidth;
 
-  const _ContestBrandLogoLine({
-    required this.contest,
-    this.fillWidth = false,
-  });
+  const _ContestBrandLogoLine({required this.contest, this.fillWidth = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2427,10 +2559,16 @@ class _LiveQuizDetailTime extends StatelessWidget {
     if (contest.isLiveEnded) {
       return Text('Terminé', style: AppTextStyles.h3);
     }
-    if (!now.isBefore(liveStartsAt)) {
+    if (contest.isLiveActiveNow) {
       return Text(
         'En direct',
         style: AppTextStyles.h3.copyWith(color: AppColors.accentGreen),
+      );
+    }
+    if (!now.isBefore(liveStartsAt)) {
+      return Text(
+        'En attente du tour',
+        style: AppTextStyles.h3.copyWith(color: AppColors.primary),
       );
     }
 

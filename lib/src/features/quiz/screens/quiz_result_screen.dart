@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../home/providers/user_profile_provider.dart';
 import '../../rewards/services/badge_award_service.dart';
+import '../../../services/app_logger.dart';
 import '../../social/share_helpers.dart';
 import '../models/question.dart';
 
@@ -20,6 +21,7 @@ class QuizResultScreen extends ConsumerStatefulWidget {
   final String participationId;
   final List<QuizQuestion> questions;
   final List<QuizAnswer> answers;
+  final int? liveElapsedMs;
 
   const QuizResultScreen({
     super.key,
@@ -27,6 +29,7 @@ class QuizResultScreen extends ConsumerStatefulWidget {
     required this.participationId,
     required this.questions,
     required this.answers,
+    this.liveElapsedMs,
   });
 
   @override
@@ -40,6 +43,7 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   int get _points =>
       widget.answers.fold(0, (sum, answer) => sum + answer.points);
   int get _durationMs =>
+      widget.liveElapsedMs ??
       widget.answers.fold(0, (sum, answer) => sum + answer.elapsedMs);
   double get _ratio =>
       widget.questions.isEmpty ? 0 : _correct / widget.questions.length;
@@ -173,6 +177,23 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
           ? profile.participationsToday
           : profile.participationsToday + 1,
       nextPointsTotal: profile.pointsTotal + points,
+    );
+
+    unawaited(
+      AppLogger.info(
+        'quiz',
+        'result_saved',
+        'Resultat quiz sauvegarde.',
+        entityType: 'contest',
+        entityId: contestId,
+        metadata: {
+          'participation_id': participationId.isEmpty ? null : participationId,
+          'points': points,
+          'duration_ms': durationMs,
+          'correct_count': correctCount,
+          'total_questions': totalQuestions,
+        },
+      ),
     );
 
     if (!mounted) return;

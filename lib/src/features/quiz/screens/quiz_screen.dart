@@ -488,12 +488,20 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
               _answers.firstWhere((answer) => answer.questionId == question.id),
         )
         .toList();
+    final liveStart = widget.liveStartsAt;
+    final liveElapsedMs = widget.isLive && liveStart != null
+        ? SyncedClockService.now()
+              .difference(liveStart)
+              .inMilliseconds
+              .clamp(0, _liveDurationMs)
+        : null;
     context.go(
       '/contests/${widget.contestId}/quiz/result',
       extra: {
         'participationId': widget.participationId,
         'questions': widget.questions,
         'answers': orderedAnswers,
+        'liveElapsedMs': liveElapsedMs,
       },
     );
   }

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/app_logger.dart';
 import '../../contests/providers/contest_providers.dart';
 
 class LiveQuizStartResult {
@@ -23,8 +24,14 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
     throw StateError('Ce Quiz Live est terminé.');
   }
 
-  if (data.contest.isLive && !data.contest.isLiveActiveNow) {
-    throw StateError('Ce Quiz Live n’est pas ouvert actuellement.');
+  if (data.contest.isLive &&
+      !data.contest.isLiveActiveNow &&
+      !data.contest.isLiveWaitingStatus) {
+    throw StateError(
+      data.contest.isLiveQueued
+          ? 'Ce Quiz Live est dans la file d’attente.'
+          : 'Ce Quiz Live n’est pas ouvert actuellement.',
+    );
   }
 
   final response = await supabase.rpc(
@@ -38,6 +45,19 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
   if (participationId == null || participationId.isEmpty) {
     throw StateError('Impossible de demarrer ce Quiz Live.');
   }
+
+  await AppLogger.info(
+    'live_quiz',
+    'start_participation',
+    'Participation Quiz Live demarree.',
+    entityType: 'contest',
+    entityId: data.contest.id,
+    metadata: {
+      'contest_title': data.contest.title,
+      'participation_id': participationId,
+      'live_status': data.contest.liveStatus,
+    },
+  );
 
   return LiveQuizStartResult(participationId: participationId);
 }
