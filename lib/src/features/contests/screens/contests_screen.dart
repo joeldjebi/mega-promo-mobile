@@ -400,7 +400,7 @@ class _ContestGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        childAspectRatio: 0.78,
+        childAspectRatio: 0.68,
       ),
       itemBuilder: (context, index) => _GridContestCard(
         contest: contests[index],
@@ -608,13 +608,6 @@ class _GridContestCard extends StatelessWidget {
               ),
             ],
             const Spacer(),
-            if (isEndedLive)
-              const _EndedLiveBadge()
-            else if (hasParticipated)
-              const _ParticipatedBadge()
-            else
-              _SmallBadge(label: _contestBadgeLabel(contest)),
-            const SizedBox(height: 8),
             if (isEndedLive)
               Text(
                 'Terminé',
