@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
+import '../../../services/network_status_service.dart';
 
 class UserProfile {
   final String id;
@@ -110,7 +111,13 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
       .limit(1)
       .maybeSingle();
 
-  final data = await profileFuture;
+  Map<String, dynamic> data;
+  try {
+    data = await profileFuture;
+  } catch (error) {
+    NetworkStatusService.instance.markOfflineFromError(error);
+    rethrow;
+  }
   authLogResponse('userProfileFetch', data);
 
   Map<String, dynamic>? activeSubscription;
@@ -118,6 +125,7 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
     activeSubscription = await subscriptionFuture;
     authLogResponse('userActiveSubscriptionFetch', activeSubscription);
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('userActiveSubscriptionFetch', error, stackTrace);
   }
 

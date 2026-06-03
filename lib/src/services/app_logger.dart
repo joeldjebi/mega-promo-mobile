@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'network_status_service.dart';
+
 class AppLogger {
   AppLogger._();
 
@@ -124,6 +126,11 @@ class AppLogger {
     String? entityType,
     String? entityId,
   }) async {
+    if (!NetworkStatusService.instance.canAttemptNetwork) {
+      debugPrint('[APP_LOGGER][offline_skip] $feature.$action $message');
+      return;
+    }
+
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
@@ -160,6 +167,12 @@ class AppLogger {
         },
       );
     } catch (logError, stackTrace) {
+      NetworkStatusService.instance.markOfflineFromError(logError);
+      if (!NetworkStatusService.instance.canAttemptNetwork ||
+          _isNetworkWriteError(logError)) {
+        debugPrint('[APP_LOGGER][network_skip] $logError');
+        return;
+      }
       debugPrint('[APP_LOGGER][write_failed] $logError');
       debugPrint('$stackTrace');
     }
@@ -224,10 +237,27 @@ class AppLogger {
   }
 
   static bool _isSensitiveKey(String key) {
-    final normalizedKey = key
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final normalizedKey = key.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
     return _sensitiveKeyFragments.any(normalizedKey.contains);
+  }
+
+  static bool _isNetworkWriteError(Object error) {
+    final rawMessage = '$error'.toLowerCase();
+    final typeName = error.runtimeType.toString().toLowerCase();
+    return typeName.contains('clientexception') ||
+        rawMessage.contains('socketexception') ||
+        rawMessage.contains('failed host lookup') ||
+        rawMessage.contains('nodename nor servname') ||
+        rawMessage.contains('internet connection appears to be offline') ||
+        rawMessage.contains('network is unreachable') ||
+        rawMessage.contains('no address associated with hostname') ||
+        rawMessage.contains('connection refused') ||
+        rawMessage.contains('connection reset') ||
+        rawMessage.contains('connection closed') ||
+        rawMessage.contains('connection timed out') ||
+        rawMessage.contains('statuscode: null');
   }
 }

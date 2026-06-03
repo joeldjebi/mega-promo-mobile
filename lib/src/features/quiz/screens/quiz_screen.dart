@@ -77,7 +77,14 @@ class QuizScreen extends ConsumerWidget {
           );
         }
 
-        final questions = ref.watch(quizQuestionsProvider(contestId));
+        final questions = ref.watch(
+          quizQuestionsProvider(
+            QuizQuestionsRequest(
+              contestId: contestId,
+              participationId: participationId,
+            ),
+          ),
+        );
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -753,13 +760,13 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
           ? _AnswerState.selected
           : _AnswerState.normal;
     }
-    if (index == _question.correctIndex) return _AnswerState.correct;
-    if (index == _selectedIndex) return _AnswerState.incorrect;
-    return _AnswerState.normal;
+    return _selectedIndex == index
+        ? _AnswerState.selected
+        : _AnswerState.normal;
   }
 }
 
-enum _AnswerState { normal, selected, correct, incorrect }
+enum _AnswerState { normal, selected }
 
 class _AnswerCard extends StatelessWidget {
   final String label;
@@ -780,8 +787,6 @@ class _AnswerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = switch (state) {
       _AnswerState.selected => AppColors.primaryLight,
-      _AnswerState.correct => AppColors.accentGreen,
-      _AnswerState.incorrect => AppColors.accentRed,
       _AnswerState.normal => AppColors.primaryDark,
     };
 

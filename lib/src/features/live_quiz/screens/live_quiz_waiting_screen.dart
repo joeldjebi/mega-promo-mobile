@@ -14,6 +14,7 @@ import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
 import '../../../services/live_quiz_notification_service.dart';
+import '../../../services/network_status_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
@@ -314,6 +315,16 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
                 ? 'Ce Quiz Live est dans la file d’attente.'
                 : 'L’arène du Quiz Live se prépare. Reviens vite.',
           ),
+        ),
+      );
+      return;
+    }
+
+    if (!await NetworkStatusService.instance.ensureOnline()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(NetworkStatusService.offlineActionMessage),
         ),
       );
       return;

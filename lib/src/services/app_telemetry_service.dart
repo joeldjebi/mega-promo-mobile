@@ -61,7 +61,9 @@ class AppTelemetryService {
     await _initializeSentry();
     _isEnabled = firebaseReady && Firebase.apps.isNotEmpty;
     if (!_isEnabled) {
-      debugPrint('[TELEMETRY][init] Firebase disabled; Sentry only if configured');
+      debugPrint(
+        '[TELEMETRY][init] Firebase disabled; Sentry only if configured',
+      );
       await setContext(<String, Object>{
         'build_mode': kReleaseMode
             ? 'release'
@@ -187,10 +189,7 @@ class AppTelemetryService {
         reason: reason == null
             ? 'retryable_network'
             : '${reason}_retryable_network',
-        context: <String, Object?>{
-          ...context,
-          'fatal_downgraded': true,
-        },
+        context: <String, Object?>{...context, 'fatal_downgraded': true},
       );
       return;
     }
@@ -202,10 +201,7 @@ class AppTelemetryService {
         error,
         stackTrace,
         reason: reason ?? 'fatal',
-        context: <String, Object?>{
-          ...context,
-          'fatal': true,
-        },
+        context: <String, Object?>{...context, 'fatal': true},
       );
     }
     if (!_isEnabled) return;
@@ -228,6 +224,13 @@ class AppTelemetryService {
     String? reason,
     Map<String, Object?> context = const <String, Object?>{},
   }) async {
+    if (isRetryableNetworkError(error)) {
+      debugPrint(
+        '[TELEMETRY][network_non_fatal] ${reason ?? 'network'} $error',
+      );
+      return;
+    }
+
     await setContext(context);
     debugPrint('[TELEMETRY][error] ${reason ?? 'non_fatal'} $error');
     if (_isSentryEnabled) {
@@ -345,6 +348,8 @@ class AppTelemetryService {
         rawMessage.contains('connection aborted') ||
         rawMessage.contains('errno = 103') ||
         rawMessage.contains('failed host lookup') ||
+        rawMessage.contains('nodename nor servname') ||
+        rawMessage.contains('internet connection appears to be offline') ||
         rawMessage.contains('network is unreachable') ||
         rawMessage.contains('no address associated with hostname') ||
         rawMessage.contains('connection timed out') ||
@@ -359,7 +364,9 @@ class AppTelemetryService {
       if (key.isEmpty || value == null) continue;
       if (_isSensitiveKey(key)) continue;
       if (value is num || value is bool || value is String) {
-        final sanitizedValue = value is String ? _maskSensitiveText(value) : value;
+        final sanitizedValue = value is String
+            ? _maskSensitiveText(value)
+            : value;
         sanitized[key] = sanitizedValue is String && sanitizedValue.length > 96
             ? sanitizedValue.substring(0, 96)
             : sanitizedValue;
@@ -388,10 +395,10 @@ class AppTelemetryService {
   }
 
   static bool _isSensitiveKey(String key) {
-    final normalizedKey = key
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final normalizedKey = key.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
     return _sensitiveKeyFragments.any(normalizedKey.contains);
   }
 
@@ -408,12 +415,10 @@ class AppTelemetryService {
         options.environment = _sentryEnvironment;
         options.release =
             'mega_promo@${packageInfo.version}+${packageInfo.buildNumber}';
-        options.tracesSampleRate = (double.tryParse(
-                  _sentryTracesSampleRateValue,
-                ) ??
-                0.1)
-            .clamp(0, 1)
-            .toDouble();
+        options.tracesSampleRate =
+            (double.tryParse(_sentryTracesSampleRateValue) ?? 0.1)
+                .clamp(0, 1)
+                .toDouble();
         options.sendDefaultPii = false;
       });
       _isSentryEnabled = true;

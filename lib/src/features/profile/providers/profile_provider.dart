@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../home/providers/user_profile_provider.dart';
+import '../../../services/network_status_service.dart';
 
 class ProfileData {
   final UserProfile user;
@@ -107,6 +108,7 @@ Future<List<Map<String, dynamic>>> _safeFetchList(
     authLogResponse(step, {'count': rows.length});
     return rows;
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError(step, error, stackTrace);
     return const [];
   }

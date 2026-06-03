@@ -13,6 +13,7 @@ import '../features/profile/providers/player_payment_methods_provider.dart';
 import '../features/rewards/providers/rewards_provider.dart';
 import 'app_telemetry_service.dart';
 import 'app_logger.dart';
+import 'network_status_service.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
@@ -76,6 +77,11 @@ class FcmService {
       debugPrint('[FCM][sync] skipped: Firebase is not initialized');
       return;
     }
+    if (!NetworkStatusService.instance.canAttemptNetwork) {
+      debugPrint('[FCM][sync] skipped: offline');
+      _scheduleSyncRetry(force: force, offline: true);
+      return;
+    }
 
     final user = Supabase.instance.client.auth.currentSession?.user;
     if (user == null) {
@@ -134,9 +140,14 @@ class FcmService {
         ),
       );
     } catch (error, stackTrace) {
+      final isNetworkError = AppTelemetryService.isRetryableNetworkError(error);
+      if (isNetworkError) {
+        NetworkStatusService.instance.markOffline();
+      }
       debugPrint('[FCM][sync] token sync failed: $error');
-      debugPrint('$stackTrace');
-      _scheduleSyncRetry(force: force);
+      if (!isNetworkError) debugPrint('$stackTrace');
+      _scheduleSyncRetry(force: force, offline: isNetworkError);
+      if (isNetworkError) return;
       unawaited(
         AppLogger.warning(
           'push',
@@ -165,19 +176,21 @@ class FcmService {
     await _stopInAppNotifications();
   }
 
-  static void _scheduleSyncRetry({bool force = false}) {
+  static void _scheduleSyncRetry({bool force = false, bool offline = false}) {
     if (_syncRetryTimer?.isActive == true) return;
     if (!force && _syncRetryAttempt >= 12) return;
 
     _syncRetryAttempt += 1;
-    final delay = Duration(seconds: _syncRetryAttempt <= 3 ? 2 : 10);
+    final delay = offline
+        ? const Duration(seconds: 60)
+        : Duration(seconds: _syncRetryAttempt <= 3 ? 2 : 10);
     debugPrint(
       '[FCM][sync] retry #$_syncRetryAttempt scheduled in ${delay.inSeconds}s',
     );
 
     _syncRetryTimer = Timer(delay, () {
       _syncRetryTimer = null;
-      unawaited(syncTokenForCurrentUser());
+      unawaited(syncTokenForCurrentUser(force: force));
     });
   }
 
@@ -236,6 +249,11 @@ class FcmService {
     _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) async {
       final user = Supabase.instance.client.auth.currentSession?.user;
       if (user == null) return;
+      if (!NetworkStatusService.instance.canAttemptNetwork) {
+        debugPrint('[FCM][refresh] skipped: offline');
+        _scheduleSyncRetry(offline: true);
+        return;
+      }
 
       try {
         debugPrint('[FCM][refresh] token refreshed ${_tokenPreview(token)}');
@@ -263,17 +281,22 @@ class FcmService {
           ),
         );
       } catch (error, stackTrace) {
+        final isNetworkError = AppTelemetryService.isRetryableNetworkError(
+          error,
+        );
+        if (isNetworkError) {
+          NetworkStatusService.instance.markOffline();
+        }
         debugPrint('[FCM][refresh] refreshed token sync failed: $error');
-        debugPrint('$stackTrace');
+        if (!isNetworkError) debugPrint('$stackTrace');
+        _scheduleSyncRetry(offline: isNetworkError);
+        if (isNetworkError) return;
         unawaited(
           AppLogger.warning(
             'push',
             'fcm_token_refresh_failed',
             'Echec synchronisation token FCM rafraichi.',
-            metadata: {
-              'platform': _platformKey(),
-              'error': error.toString(),
-            },
+            metadata: {'platform': _platformKey(), 'error': error.toString()},
           ),
         );
         unawaited(
@@ -341,8 +364,7 @@ class FcmService {
           ),
           callback: (payload) {
             final notification = payload.newRecord;
-            final title =
-                notification['title'] as String? ?? 'Nouveau quiz';
+            final title = notification['title'] as String? ?? 'Nouveau quiz';
             final type = notification['type'] as String? ?? 'info';
             debugPrint(
               '[FCM][in-app] notification received id=${notification['id']} '

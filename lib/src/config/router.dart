@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,6 +31,7 @@ import '../features/settings/providers/app_feature_flags_provider.dart';
 import '../features/subscriptions/screens/player_plans_screen.dart';
 import '../services/app_telemetry_service.dart';
 import '../services/fcm_service.dart';
+import '../services/network_status_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final supabase = ref.watch(supabaseProvider);
@@ -200,21 +201,37 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/home',
-            builder: (context, state) => const HomeScreen(),
+            pageBuilder: (context, state) => _buildMainTabPage(
+              state: state,
+              tabIndex: 0,
+              child: const HomeScreen(),
+            ),
           ),
           GoRoute(
             path: '/contests',
-            builder: (context, state) => const ContestsScreen(),
+            pageBuilder: (context, state) => _buildMainTabPage(
+              state: state,
+              tabIndex: 1,
+              child: const ContestsScreen(),
+            ),
           ),
           GoRoute(
             path: '/leaderboard',
-            builder: (context, state) => LeaderboardScreen(
-              contestId: state.uri.queryParameters['contestId'],
+            pageBuilder: (context, state) => _buildMainTabPage(
+              state: state,
+              tabIndex: 2,
+              child: LeaderboardScreen(
+                contestId: state.uri.queryParameters['contestId'],
+              ),
             ),
           ),
           GoRoute(
             path: '/rewards',
-            builder: (context, state) => const RewardsScreen(),
+            pageBuilder: (context, state) => _buildMainTabPage(
+              state: state,
+              tabIndex: 3,
+              child: const RewardsScreen(),
+            ),
           ),
           GoRoute(
             path: '/rewards/:winnerId',
@@ -233,7 +250,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/profile',
-            builder: (context, state) => const ProfileScreen(),
+            pageBuilder: (context, state) => _buildMainTabPage(
+              state: state,
+              tabIndex: 4,
+              child: const ProfileScreen(),
+            ),
           ),
           GoRoute(
             path: '/subscriptions',
@@ -251,6 +272,43 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
+int? _lastMainTabIndex;
+
+Page<void> _buildMainTabPage({
+  required GoRouterState state,
+  required int tabIndex,
+  required Widget child,
+}) {
+  final previousIndex = _lastMainTabIndex;
+  _lastMainTabIndex = tabIndex;
+
+  if (previousIndex == null || previousIndex == tabIndex) {
+    return NoTransitionPage(key: state.pageKey, child: child);
+  }
+
+  final direction = tabIndex > previousIndex ? 1.0 : -1.0;
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: const Duration(milliseconds: 220),
+    reverseTransitionDuration: const Duration(milliseconds: 220),
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curvedAnimation = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(direction, 0),
+          end: Offset.zero,
+        ).animate(curvedAnimation),
+        child: child,
+      );
+    },
+  );
+}
+
 Future<String?> _maintenanceRedirect({
   required String userId,
   required bool goingToMaintenance,
@@ -262,6 +320,8 @@ Future<String?> _maintenanceRedirect({
     return goingToMaintenance ? '/home' : null;
   }
 
+  if (!NetworkStatusService.instance.canAttemptNetwork) return null;
+
   final isAdmin = await _isAdminUser(userId);
   if (isAdmin) return goingToMaintenance ? '/home' : null;
 
@@ -269,6 +329,8 @@ Future<String?> _maintenanceRedirect({
 }
 
 Future<bool> _isAdminUser(String userId) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) return false;
+
   try {
     final profile = await Supabase.instance.client
         .from('users')
@@ -284,6 +346,11 @@ Future<bool> _isAdminUser(String userId) async {
             role == 'super-admin' ||
             role == 'sa');
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
+    if (AppTelemetryService.isRetryableNetworkError(error)) {
+      debugPrint('[ROUTER][maintenanceRole] network skipped: $error');
+      return false;
+    }
     debugPrint('[ROUTER][maintenanceRole] skipped: $error');
     unawaited(
       AppTelemetryService.recordError(
@@ -300,6 +367,8 @@ Future<String?> _accountStatusRedirect({
   required String userId,
   required bool goingToAccountReactivation,
 }) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) return null;
+
   try {
     final profile = await Supabase.instance.client
         .from('users')
@@ -325,6 +394,11 @@ Future<String?> _accountStatusRedirect({
       return '/login';
     }
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
+    if (AppTelemetryService.isRetryableNetworkError(error)) {
+      debugPrint('[ROUTER][accountStatus] network skipped: $error');
+      return null;
+    }
     debugPrint('[ROUTER][accountStatus] skipped: $error');
     unawaited(
       AppTelemetryService.recordError(

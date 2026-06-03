@@ -86,6 +86,7 @@ class Contest {
   final int liveQuestionsCount;
   final int liveDurationSeconds;
   final int participantsCount;
+  final int quizQuestionCount;
 
   const Contest({
     required this.id,
@@ -118,9 +119,11 @@ class Contest {
     required this.liveQuestionsCount,
     required this.liveDurationSeconds,
     required this.participantsCount,
+    required this.quizQuestionCount,
   });
 
   factory Contest.fromJson(Map<String, dynamic> json) {
+    final rewardMetadata = _jsonMap(json['reward_metadata']);
     return Contest(
       id: json['id'] as String,
       title: json['title'] as String? ?? 'Quiz MegaPromo',
@@ -156,6 +159,7 @@ class Contest {
       liveDurationSeconds:
           (json['live_duration_seconds'] as num?)?.toInt() ?? 0,
       participantsCount: (json['participants_count'] as num?)?.toInt() ?? 0,
+      quizQuestionCount: _questionCountFromMetadata(rewardMetadata),
     );
   }
 
@@ -191,6 +195,7 @@ class Contest {
       liveQuestionsCount: liveQuestionsCount,
       liveDurationSeconds: liveDurationSeconds,
       participantsCount: participantsCount,
+      quizQuestionCount: quizQuestionCount,
     );
   }
 
@@ -226,6 +231,7 @@ class Contest {
       liveQuestionsCount: liveQuestionsCount,
       liveDurationSeconds: liveDurationSeconds,
       participantsCount: participantsCount,
+      quizQuestionCount: quizQuestionCount,
     );
   }
 
@@ -311,6 +317,24 @@ class Contest {
         })
         .join(' + ');
   }
+}
+
+Map<String, dynamic> _jsonMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((key, entry) => MapEntry('$key', entry));
+  }
+  return const {};
+}
+
+int _questionCountFromMetadata(Map<String, dynamic> metadata) {
+  final value = metadata['question_count'];
+  if (value is num) return value.toInt().clamp(1, 50);
+  if (value is String) {
+    final parsed = int.tryParse(value);
+    if (parsed != null) return parsed.clamp(1, 50);
+  }
+  return 5;
 }
 
 List<String> _allowedPlanKeys(Object? value) {

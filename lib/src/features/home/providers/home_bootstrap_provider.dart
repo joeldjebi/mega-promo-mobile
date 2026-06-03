@@ -9,6 +9,7 @@ import '../../auth/utils/auth_debug_logger.dart';
 import '../../contests/models/contest.dart';
 import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/network_status_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
 import 'user_profile_provider.dart';
@@ -56,7 +57,6 @@ final homeBootstrapProvider = FutureProvider.autoDispose<HomeBootstrapData>((
   final cacheTimer = Timer(const Duration(seconds: 25), keepAliveLink.close);
   ref.onDispose(cacheTimer.cancel);
 
-  final supabase = ref.watch(supabaseProvider);
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) {
     throw StateError('Utilisateur non connecté.');
@@ -75,8 +75,14 @@ final homeBootstrapProvider = FutureProvider.autoDispose<HomeBootstrapData>((
   if (stored != null) {
     _cachedHomeBootstrap = stored;
     _cachedHomeBootstrapAt = DateTime.now();
-    unawaited(_refreshStoredHomeBootstrap(ref, userId));
+    if (NetworkStatusService.instance.canAttemptNetwork) {
+      unawaited(_refreshStoredHomeBootstrap(ref, userId));
+    }
     return stored;
+  }
+
+  if (!NetworkStatusService.instance.canAttemptNetwork && cached != null) {
+    return cached;
   }
 
   final pending = _pendingHomeBootstrap;
@@ -101,14 +107,21 @@ final homeBootstrapProvider = FutureProvider.autoDispose<HomeBootstrapData>((
 });
 
 Future<HomeBootstrapData> _fetchHomeBootstrap(Ref ref, String userId) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) {
+    final cached = _cachedHomeBootstrap;
+    if (cached != null && cached.profile.id == userId) return cached;
+  }
+
   final supabase = ref.watch(supabaseProvider);
   authLogPayload('homeBootstrap', {'userId': userId});
   try {
     await supabase.rpc('process_contest_events');
-  } catch (_) {
+  } catch (error) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     try {
       await supabase.rpc('process_live_quiz_events');
-    } catch (_) {
+    } catch (fallbackError) {
+      NetworkStatusService.instance.markOfflineFromError(fallbackError);
       // The bootstrap RPC still filters expired live quizzes client-side if the
       // maintenance RPC has not been deployed yet.
     }
@@ -118,6 +131,7 @@ Future<HomeBootstrapData> _fetchHomeBootstrap(Ref ref, String userId) async {
   try {
     response = await supabase.rpc('get_mobile_home_bootstrap');
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('homeBootstrap', error, stackTrace);
     return _fetchHomeBootstrapFallback(ref, userId);
   }
@@ -170,6 +184,8 @@ HomeBootstrapData _payloadToHomeBootstrapData(Map<String, dynamic> payload) {
 }
 
 Future<void> _refreshStoredHomeBootstrap(Ref ref, String userId) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) return;
+
   try {
     final data = await _fetchHomeBootstrap(ref, userId);
     _cachedHomeBootstrap = data;
@@ -184,15 +200,22 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   Ref ref,
   String userId,
 ) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) {
+    final cached = _cachedHomeBootstrap;
+    if (cached != null && cached.profile.id == userId) return cached;
+  }
+
   final supabase = ref.watch(supabaseProvider);
   authLogPayload('homeBootstrapFallback', {'userId': userId});
 
   try {
     await supabase.rpc('process_contest_events');
-  } catch (_) {
+  } catch (error) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     try {
       await supabase.rpc('process_live_quiz_events');
-    } catch (_) {
+    } catch (fallbackError) {
+      NetworkStatusService.instance.markOfflineFromError(fallbackError);
       // The fallback must keep the Home usable even before maintenance RPCs are
       // deployed.
     }
@@ -202,6 +225,7 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
   try {
     profile = await fetchCurrentUserProfile(ref, userId: userId);
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('homeBootstrapFallbackProfile', error, stackTrace);
     if (AppTelemetryService.isRetryableNetworkError(error)) {
       final cached = _cachedHomeBootstrap;
@@ -226,6 +250,7 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
         .where((contest) => contest.isAccessibleForPlan(profile.planKey))
         .toList();
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('homeBootstrapFallbackContests', error, stackTrace);
     if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
     unawaited(
@@ -294,6 +319,7 @@ Future<List<dynamic>> _selectRowsOrEmpty(
     final rows = await query;
     return rows is List ? rows : const <dynamic>[];
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError(reason, error, stackTrace);
     if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
     unawaited(

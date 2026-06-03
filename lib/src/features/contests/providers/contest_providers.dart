@@ -8,6 +8,7 @@ import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../../config/app_store_review_mode.dart';
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/network_status_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
 import '../models/contest.dart';
@@ -43,7 +44,6 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
     'order': 'starts_at asc',
     'playerPlan': userPlanKey,
   });
-  await _processLiveQuizEvents(supabase);
 
   var lastGoodContests = const <Contest>[];
   final bootstrapContests = bootstrap?.contests;
@@ -58,10 +58,18 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
     yield lastGoodContests;
   }
 
+  if (!NetworkStatusService.instance.canAttemptNetwork) {
+    yield lastGoodContests;
+    return;
+  }
+
+  await _processLiveQuizEvents(supabase);
+
   try {
     lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
     yield lastGoodContests;
   } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('contestsInitialSnapshot', error, stackTrace);
     if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
     unawaited(
@@ -87,6 +95,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
           lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
           return lastGoodContests;
         } catch (error, stackTrace) {
+          NetworkStatusService.instance.markOfflineFromError(error);
           authLogError('contestsStreamSnapshot', error, stackTrace);
           if (!AppTelemetryService.isRetryableNetworkError(error)) rethrow;
           unawaited(
@@ -160,12 +169,16 @@ DateTime _contestScheduleAt(Contest contest) {
 }
 
 Future<void> _processLiveQuizEvents(dynamic supabase) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) return;
+
   try {
     await supabase.rpc('process_contest_events');
-  } catch (_) {
+  } catch (error) {
+    NetworkStatusService.instance.markOfflineFromError(error);
     try {
       await supabase.rpc('process_live_quiz_events');
-    } catch (_) {
+    } catch (fallbackError) {
+      NetworkStatusService.instance.markOfflineFromError(fallbackError);
       // The stream can still render with the current rows if the maintenance
       // RPC has not been deployed yet.
     }
@@ -263,6 +276,7 @@ final contestParticipantsCountProvider = FutureProvider.autoDispose
 class ContestDetailData {
   final Contest contest;
   final bool hasParticipated;
+  final String? participationId;
   final ContestUserRanking? userRanking;
   final UserProfile userProfile;
   final int participantsCount;
@@ -273,6 +287,7 @@ class ContestDetailData {
   const ContestDetailData({
     required this.contest,
     required this.hasParticipated,
+    required this.participationId,
     required this.userRanking,
     required this.userProfile,
     required this.participantsCount,
@@ -544,7 +559,7 @@ Future<Map<String, dynamic>?> _fetchContestParticipation(
   });
   final participation = await supabase
       .from('participations')
-      .select('id')
+      .select('id, completed')
       .eq('user_id', userId)
       .eq('contest_id', contestId)
       .maybeSingle();
@@ -614,10 +629,11 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   final profileFuture = bootstrap?.profile == null
       ? fetchCurrentUserProfile(ref, userId: userId)
       : Future<UserProfile>.value(bootstrap!.profile);
-  final participationFuture =
-      bootstrap?.participatedContestIds.contains(contestId) == true
-      ? Future<Map<String, dynamic>?>.value(<String, dynamic>{'id': 'cached'})
-      : _fetchContestParticipation(supabase, userId, contestId);
+  final participationFuture = _fetchContestParticipation(
+    supabase,
+    userId,
+    contestId,
+  );
 
   final liveRegistrationFuture =
       bootstrap?.registeredLiveQuizIds.contains(contestId) == true
@@ -746,6 +762,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   final detail = ContestDetailData(
     contest: contest,
     hasParticipated: participation != null,
+    participationId: participation?['id'] as String?,
     userRanking: userRanking,
     userProfile: profile,
     participantsCount: participantsCount,

@@ -8,6 +8,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_telemetry_service.dart';
+import 'network_status_service.dart';
+
 class DeviceTelemetryService {
   DeviceTelemetryService._();
 
@@ -23,6 +26,8 @@ class DeviceTelemetryService {
   }
 
   static Future<void> syncForCurrentUser({bool force = false}) async {
+    if (!NetworkStatusService.instance.canAttemptNetwork) return;
+
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -46,6 +51,11 @@ class DeviceTelemetryService {
       );
       _lastSyncAt = DateTime.now();
     } catch (error) {
+      NetworkStatusService.instance.markOfflineFromError(error);
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        debugPrint('Device telemetry sync skipped: network unavailable');
+        return;
+      }
       debugPrint('Device telemetry sync failed: $error');
     }
   }

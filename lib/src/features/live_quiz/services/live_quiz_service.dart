@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_logger.dart';
+import '../../../services/network_status_service.dart';
 import '../../contests/providers/contest_providers.dart';
 
 class LiveQuizStartResult {
@@ -12,6 +13,10 @@ class LiveQuizStartResult {
 Future<LiveQuizStartResult> startLiveQuizParticipation({
   required ContestDetailData data,
 }) async {
+  if (!await NetworkStatusService.instance.ensureOnline()) {
+    throw StateError(NetworkStatusService.offlineActionMessage);
+  }
+
   final supabase = Supabase.instance.client;
   final user = supabase.auth.currentUser;
   if (user == null) throw StateError('Utilisateur non connecté.');

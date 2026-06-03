@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_telemetry_service.dart';
 import 'device_telemetry_service.dart';
 import 'fcm_service.dart';
+import 'network_status_service.dart';
 
 class DeviceSessionService {
   DeviceSessionService._();
@@ -29,7 +30,11 @@ class DeviceSessionService {
     );
   }
 
+  static Future<String> currentSessionId() => _getSessionId();
+
   static Future<void> claimCurrentSession({bool force = false}) async {
+    if (!NetworkStatusService.instance.canAttemptNetwork) return;
+
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentSession?.user;
     if (user == null) return;
@@ -45,6 +50,11 @@ class DeviceSessionService {
       );
       if (force) await validateCurrentSession();
     } catch (error, stackTrace) {
+      NetworkStatusService.instance.markOfflineFromError(error);
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        debugPrint('Device session claim skipped: network unavailable');
+        return;
+      }
       debugPrint('Device session claim failed: $error');
       unawaited(
         AppTelemetryService.recordError(
@@ -57,6 +67,7 @@ class DeviceSessionService {
   }
 
   static Future<void> validateCurrentSession() async {
+    if (!NetworkStatusService.instance.canAttemptNetwork) return;
     if (_isChecking) return;
     _isChecking = true;
     try {
@@ -87,6 +98,11 @@ class DeviceSessionService {
         }
       }
     } catch (error, stackTrace) {
+      NetworkStatusService.instance.markOfflineFromError(error);
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        debugPrint('Device session validation skipped: network unavailable');
+        return;
+      }
       debugPrint('Device session validation failed: $error');
       unawaited(
         AppTelemetryService.recordError(

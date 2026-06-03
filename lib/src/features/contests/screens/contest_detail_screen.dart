@@ -21,6 +21,8 @@ import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
 import '../../../services/live_quiz_notification_service.dart';
+import '../../../services/device_session_service.dart';
+import '../../../services/network_status_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
 import '../../social/share_helpers.dart';
@@ -399,6 +401,17 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       !_canStartLiveQuiz &&
       !data.contest.isLiveEnded;
 
+  bool get _isClassicQuizEnded {
+    if (data.contest.isLive || data.contest.type != ContestType.quiz) {
+      return false;
+    }
+    final status = data.contest.status.toLowerCase().trim();
+    return status == 'ended' ||
+        status == 'completed' ||
+        status == 'finished' ||
+        !data.contest.endsAt.isAfter(SyncedClockService.now());
+  }
+
   bool get _isActionDisabled =>
       _planAccessDenied ||
       (data.contest.isLive && !data.contest.isLiveReady) ||
@@ -421,6 +434,11 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       if (_canStartLiveQuiz) return 'Démarrer le Quiz Live';
       return 'Place réservée';
     }
+    if (data.hasParticipated && data.contest.type == ContestType.quiz) {
+      return _isClassicQuizEnded
+          ? 'Voir mon résultat'
+          : 'Participation enregistrée';
+    }
     if (data.hasParticipated) return 'Déjà joué · Voir détails';
     if (_dailyLimitReached) {
       return 'Voir les options';
@@ -439,6 +457,17 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     ref.invalidate(userParticipatedContestIdsProvider);
     ref.invalidate(userRegisteredLiveQuizIdsProvider);
     ref.invalidate(contestDetailProvider(data.contest.id));
+  }
+
+  void _openMyQuizResult(BuildContext context) {
+    context.go(
+      '/contests/${data.contest.id}/quiz/result',
+      extra: {
+        'participationId': data.participationId ?? '',
+        'questions': const [],
+        'answers': const [],
+      },
+    );
   }
 
   Future<void> _shareOnWhatsApp(BuildContext context) async {
@@ -514,6 +543,19 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             ),
           ),
         );
+        await stopLoading();
+        return;
+      }
+
+      final messenger = ScaffoldMessenger.of(context);
+      if (!await NetworkStatusService.instance.ensureOnline()) {
+        if (mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(NetworkStatusService.offlineActionMessage),
+            ),
+          );
+        }
         await stopLoading();
         return;
       }
@@ -595,7 +637,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           return;
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           const SnackBar(
             content: Text('La salle d’attente est disponible avant le départ.'),
           ),
@@ -637,29 +679,35 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
 
     if (data.contest.type == ContestType.quiz) {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      if (user == null) {
+      if (!await NetworkStatusService.instance.ensureOnline()) {
+        if (mounted) {
+          ScaffoldMessenger.of(this.context).showSnackBar(
+            const SnackBar(
+              content: Text(NetworkStatusService.offlineActionMessage),
+            ),
+          );
+        }
         await stopLoading();
         return;
       }
 
+      final supabase = Supabase.instance.client;
       try {
-        final participation = await supabase
-            .from('participations')
-            .insert({
-              'user_id': user.id,
-              'contest_id': data.contest.id,
-              'score': 0,
-              'answers': {
-                'type': data.contest.type.name,
-                'status': 'started',
-                'started_at': DateTime.now().toIso8601String(),
-              },
-              'completed': false,
-            })
-            .select('id')
-            .single();
+        final deviceSessionId = await DeviceSessionService.currentSessionId();
+        final result = await supabase.rpc(
+          'start_quiz_contest',
+          params: {
+            'p_contest_id': data.contest.id,
+            'p_question_count': data.contest.quizQuestionCount,
+            'p_device_session_id': deviceSessionId,
+          },
+        );
+        final participationId = result is Map
+            ? result['participation_id'] as String?
+            : null;
+        if (participationId == null || participationId.isEmpty) {
+          throw StateError('Participation introuvable après démarrage quiz.');
+        }
 
         unawaited(
           AppLogger.info(
@@ -670,26 +718,17 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             entityId: data.contest.id,
             metadata: {
               'contest_title': data.contest.title,
-              'participation_id': participation['id'] as String?,
+              'participation_id': participationId,
+              if (result is Map) 'questions_count': result['questions_count'],
             },
           ),
         );
-
-        await supabase
-            .from('users')
-            .update({
-              'participations_today': data.userProfile.participationsToday + 1,
-              'last_participation_date': DateTime.now().toIso8601String().split(
-                'T',
-              )[0],
-            })
-            .eq('id', user.id);
 
         _refreshParticipationState(ref);
         if (!context.mounted) return;
         context.go(
           '/contests/${data.contest.id}/quiz',
-          extra: {'participationId': participation['id'] as String},
+          extra: {'participationId': participationId},
         );
       } catch (error, stackTrace) {
         unawaited(
@@ -718,7 +757,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
 
     if (data.contest.type == ContestType.pronostic) {
       await showModalBottomSheet<void>(
-        context: context,
+        context: this.context,
         isScrollControlled: true,
         backgroundColor: AppColors.surface,
         shape: const RoundedRectangleBorder(
@@ -732,7 +771,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
 
     await showModalBottomSheet<void>(
-      context: context,
+      context: this.context,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
@@ -1019,16 +1058,24 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             child: AppButton(
               text: _buttonText,
               isLoading: _isActionRunning,
-              color: data.hasParticipated && !contest.isLive
+              color:
+                  data.hasParticipated &&
+                      !contest.isLive &&
+                      !(contest.type == ContestType.quiz && _isClassicQuizEnded)
                   ? AppColors.surfaceBorder
                   : null,
-              foregroundColor: data.hasParticipated && !contest.isLive
+              foregroundColor:
+                  data.hasParticipated &&
+                      !contest.isLive &&
+                      !(contest.type == ContestType.quiz && _isClassicQuizEnded)
                   ? AppColors.textSecondary
                   : null,
               onPressed: _isActionDisabled || _isActionRunning
                   ? null
                   : data.hasParticipated
-                  ? () => _refreshParticipationState(ref)
+                  ? data.contest.type == ContestType.quiz
+                        ? () => _openMyQuizResult(context)
+                        : () => _refreshParticipationState(ref)
                   : (!contest.isLive && _dailyLimitReached)
                   ? () => _openSubscriptions(context)
                   : () => _participate(context),
@@ -1347,6 +1394,16 @@ class _DrawParticipationSheetState
   bool _isDone = false;
 
   Future<void> _confirm() async {
+    if (!await NetworkStatusService.instance.ensureOnline()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(NetworkStatusService.offlineActionMessage),
+        ),
+      );
+      return;
+    }
+
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -1598,6 +1655,16 @@ class _PredictionParticipationSheetState
 
     final predictionAnswer = _buildPredictionAnswer(prediction);
     if (predictionAnswer == null) {
+      return;
+    }
+
+    if (!await NetworkStatusService.instance.ensureOnline()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(NetworkStatusService.offlineActionMessage),
+        ),
+      );
       return;
     }
 
@@ -1896,7 +1963,7 @@ class _PredictionParticipationSheetState
                 Text(
                   isConfigured
                       ? isOpen
-                            ? _predictionHelpText(prediction!)
+                            ? _predictionHelpText(prediction)
                             : 'Ce quiz sport est actuellement fermé.'
                       : 'Ce jeu n’est pas encore configuré par MegaPromo.',
                   textAlign: TextAlign.center,

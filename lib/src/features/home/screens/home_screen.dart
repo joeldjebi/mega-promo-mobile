@@ -129,7 +129,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         titleSpacing: 16,
         title: profile.when(
           data: (user) => _HomeHeader(user: user),
-          loading: () => const _HomeHeaderShimmer(),
+          loading: () => _lastContests == null
+              ? const _HomeHeaderShimmer()
+              : const _HomeHeaderFallback(),
           error: (error, stackTrace) => const _HomeHeaderError(),
         ),
       ),
@@ -2060,28 +2062,80 @@ class _HomeHeaderShimmer extends StatelessWidget {
     return Shimmer.fromColors(
       baseColor: AppColors.surfaceElevated,
       highlightColor: AppColors.surfaceBorder,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    _ShimmerBlock(width: 196, height: 24),
-                    SizedBox(height: 10),
-                    _ShimmerBlock(width: 170, height: 14),
-                  ],
-                ),
-              ),
-              _ShimmerCircle(size: 48),
-            ],
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ShimmerBlock(width: 78, height: 13),
+                SizedBox(height: 7),
+                _ShimmerBlock(width: 150, height: 24),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          const _ShimmerBlock(width: double.infinity, height: 84),
+          const SizedBox(width: 10),
+          const _ShimmerBlock(width: 70, height: 38),
+          const SizedBox(width: 10),
+          const _ShimmerCircle(size: 39),
         ],
       ),
+    );
+  }
+}
+
+class _HomeHeaderFallback extends StatelessWidget {
+  const _HomeHeaderFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _homeGreeting(),
+                style: AppTextStyles.bodySecondary.copyWith(
+                  color: _homeOnBackgroundColor.withValues(alpha: 0.82),
+                  fontSize: 12.5,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                'MegaPromo',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.h1.copyWith(
+                  color: _homeOnBackgroundColor,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          width: 39,
+          height: 39,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: 0.16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.26)),
+          ),
+          child: const Icon(
+            Icons.person_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
+        ),
+      ],
     );
   }
 }

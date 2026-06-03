@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../notifications/providers/notifications_provider.dart';
+import '../../../services/network_status_service.dart';
 import '../providers/rewards_provider.dart';
 
 enum _RewardsTab { contests, liveQuiz }
@@ -129,7 +130,7 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
                         padding: const EdgeInsets.only(bottom: 9),
                         child: _RewardCard(
                           reward: reward,
-                          onTap: () => context.go('/rewards/${reward.id}'),
+                          onTap: () => _openRewardDetail(reward),
                         ),
                       ),
                     ),
@@ -224,6 +225,21 @@ class _RewardsScreenState extends ConsumerState<RewardsScreen> {
         ..invalidate(notificationsProvider)
         ..invalidate(homeBootstrapProvider);
     });
+  }
+
+  Future<void> _openRewardDetail(RewardPrize reward) async {
+    if (!await NetworkStatusService.instance.ensureOnline()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(NetworkStatusService.offlineActionMessage),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    context.go('/rewards/${reward.id}');
   }
 }
 

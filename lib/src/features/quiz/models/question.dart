@@ -24,7 +24,7 @@ class QuizQuestion {
   factory QuizQuestion.fromJson(Map<String, dynamic> json) {
     return QuizQuestion(
       id: json['id'] as String,
-      contestId: json['contest_id'] as String,
+      contestId: json['contest_id'] as String? ?? '',
       questionText: json['question_text'] as String? ?? '',
       questionImageUrl: _cleanUrl(json['question_image_url'] as String?),
       options: [

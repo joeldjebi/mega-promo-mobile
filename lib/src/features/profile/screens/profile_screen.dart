@@ -9,6 +9,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
@@ -37,7 +38,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final profile = _lastProfileData == null
         ? watchedProfile
         : AsyncData(_lastProfileData!);
-    final featureFlags = ref.watch(appFeatureFlagsProvider).maybeWhen(
+    final featureFlags = ref
+        .watch(appFeatureFlagsProvider)
+        .maybeWhen(
           data: (flags) => flags,
           orElse: () => AppFeatureFlags.defaults.appStoreSafe(),
         );
@@ -49,12 +52,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           data: (data) => _CompactProfilePage(
             data: data,
             showPlansAction: featureFlags.playerSubscriptionsEnabled,
-            showCoordinatesAction:
-                featureFlags.playerProfileCoordinatesEnabled,
+            showCoordinatesAction: featureFlags.playerProfileCoordinatesEnabled,
             showRewardsAction: featureFlags.playerProfileRewardsEnabled,
             onEdit: () => _showEditProfileSheet(context, ref, data),
           ),
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => const _ProfileSkeletonPage(),
           error: (error, stackTrace) => Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -66,6 +68,280 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileSkeletonPage extends StatelessWidget {
+  const _ProfileSkeletonPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxHeight < 700;
+        final horizontalPadding = 18.0;
+        final topPadding = isCompact ? 12.0 : 18.0;
+        const bottomPadding = 12.0;
+
+        return Shimmer.fromColors(
+          baseColor: const Color(0xFFE5E7EF),
+          highlightColor: Colors.white,
+          child: SingleChildScrollView(
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              topPadding,
+              horizontalPadding,
+              bottomPadding,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight - topPadding - bottomPadding,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ProfileSkeletonHeader(isCompact: isCompact),
+                  SizedBox(height: isCompact ? 12 : 16),
+                  _ProfileSkeletonStatsStrip(isCompact: isCompact),
+                  SizedBox(height: isCompact ? 10 : 14),
+                  _ProfileSkeletonActionPanel(isCompact: isCompact),
+                  SizedBox(height: isCompact ? 8 : 10),
+                  _ProfileSkeletonBlock(
+                    width: double.infinity,
+                    height: isCompact ? 42 : 46,
+                    radius: 18,
+                  ),
+                  SizedBox(height: isCompact ? 14 : 18),
+                  _ProfileSkeletonFooter(isCompact: isCompact),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ProfileSkeletonHeader extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileSkeletonHeader({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarSize = isCompact ? 74.0 : 86.0;
+
+    return Column(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _ProfileSkeletonCircle(size: avatarSize),
+            Positioned(
+              right: -4,
+              bottom: 0,
+              child: _ProfileSkeletonCircle(size: 31),
+            ),
+          ],
+        ),
+        SizedBox(height: isCompact ? 9 : 12),
+        _ProfileSkeletonBlock(width: 156, height: isCompact ? 20 : 23),
+        const SizedBox(height: 7),
+        _ProfileSkeletonBlock(width: 126, height: isCompact ? 12 : 13),
+        SizedBox(height: isCompact ? 9 : 11),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            _ProfileSkeletonBlock(width: 88, height: 24, radius: 999),
+            SizedBox(width: 8),
+            _ProfileSkeletonBlock(width: 74, height: 24, radius: 999),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileSkeletonStatsStrip extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileSkeletonStatsStrip({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: isCompact ? 70 : 76,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Row(
+        children: [
+          for (var index = 0; index < 4; index++) ...[
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _ProfileSkeletonCircle(size: isCompact ? 15 : 17),
+                  const SizedBox(height: 6),
+                  _ProfileSkeletonBlock(width: 32, height: isCompact ? 14 : 15),
+                  const SizedBox(height: 5),
+                  _ProfileSkeletonBlock(width: 44, height: isCompact ? 8 : 9),
+                ],
+              ),
+            ),
+            if (index < 3) const _CompactDivider(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileSkeletonActionPanel extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileSkeletonActionPanel({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: isCompact ? 278 : 318,
+      child: Container(
+        padding: EdgeInsets.all(isCompact ? 10 : 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: AppColors.surfaceBorder),
+        ),
+        child: Column(
+          children: [
+            for (var rowIndex = 0; rowIndex < 3; rowIndex++) ...[
+              if (rowIndex > 0) const SizedBox(height: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ProfileSkeletonActionTile(isCompact: isCompact),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _ProfileSkeletonActionTile(isCompact: isCompact),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileSkeletonActionTile extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileSkeletonActionTile({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(isCompact ? 9 : 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F7FA),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              _ProfileSkeletonBlock(
+                width: isCompact ? 30 : 34,
+                height: isCompact ? 30 : 34,
+                radius: 11,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ProfileSkeletonBlock(
+                  width: double.infinity,
+                  height: isCompact ? 13 : 14,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: isCompact ? 7 : 9),
+          _ProfileSkeletonBlock(width: 82, height: isCompact ? 9.5 : 10),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileSkeletonFooter extends StatelessWidget {
+  final bool isCompact;
+
+  const _ProfileSkeletonFooter({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _ProfileSkeletonBlock(width: 134, height: isCompact ? 10 : 11),
+        const SizedBox(height: 8),
+        _ProfileSkeletonBlock(width: 220, height: 11),
+        const SizedBox(height: 8),
+        _ProfileSkeletonBlock(width: 160, height: isCompact ? 11 : 13),
+      ],
+    );
+  }
+}
+
+class _ProfileSkeletonBlock extends StatelessWidget {
+  final double width;
+  final double height;
+  final double radius;
+
+  const _ProfileSkeletonBlock({
+    required this.width,
+    required this.height,
+    this.radius = 10,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
+}
+
+class _ProfileSkeletonCircle extends StatelessWidget {
+  final double size;
+
+  const _ProfileSkeletonCircle({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
       ),
     );
   }
@@ -417,10 +693,7 @@ class _CompactProfileHeader extends StatelessWidget {
             _CompactPill(text: data.user.planName),
             if (showStatusPill) ...[
               const SizedBox(width: 8),
-              _CompactPill(
-                text: statusLabel,
-                highlighted: data.user.isPremium,
-              ),
+              _CompactPill(text: statusLabel, highlighted: data.user.isPremium),
             ],
           ],
         ),
@@ -628,9 +901,7 @@ class _ProfileActionPanel extends StatelessWidget {
         _ProfileAction(
           icon: Icons.card_giftcard_rounded,
           title: 'Récompenses',
-          subtitle: data.wins.isEmpty
-              ? 'Aucun'
-              : '${data.wins.length} récents',
+          subtitle: data.wins.isEmpty ? 'Aucun' : '${data.wins.length} récents',
           onTap: () => _showProfileActivitySheet(
             context,
             title: 'Toutes mes récompenses',
@@ -1028,9 +1299,7 @@ void _showKycRequiredSheet(
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
     builder: (_) => Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: _KycRequiredSheet(profile: profile),
     ),
   );
@@ -1087,125 +1356,125 @@ class _KycRequiredSheetState extends ConsumerState<_KycRequiredSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          Text(title, style: AppTextStyles.h2),
-          const SizedBox(height: 8),
-          Text(description, style: AppTextStyles.bodySecondary),
-          if (latestStatus == 'rejected' && rejectionReason.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.accentRed.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: AppColors.accentRed.withValues(alpha: 0.18),
+            Text(title, style: AppTextStyles.h2),
+            const SizedBox(height: 8),
+            Text(description, style: AppTextStyles.bodySecondary),
+            if (latestStatus == 'rejected' && rejectionReason.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.accentRed.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.accentRed.withValues(alpha: 0.18),
+                  ),
                 ),
-              ),
-              child: Text(
-                rejectionReason,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w700,
+                child: Text(
+                  rejectionReason,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ),
-          ],
-          if (canSubmit) ...[
-            const SizedBox(height: 16),
-            _NativeSelectField(
-              label: 'Type de pièce',
-              value: _documentType,
-              options: const [
-                _NativeSelectOption(
-                  value: 'national_id',
-                  label: 'Carte Nationale d’Identité',
-                ),
-                _NativeSelectOption(value: 'passport', label: 'Passport'),
-                _NativeSelectOption(
-                  value: 'driver_license',
-                  label: 'Permis de conduire',
-                ),
-              ],
-              enabled: !_saving,
-              onChanged: (value) => setState(() {
-                _documentType = value;
-                if (!_requiresBackFile) _backFile = null;
-              }),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _documentType == 'national_id'
-                  ? 'Pièces à fournir : recto et verso de ta CNI.'
-                  : 'Pièce à fournir : photo lisible du document.',
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textHint,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _KycFilePickerTile(
-              label: _documentType == 'national_id'
-                  ? 'Charger le recto'
-                  : 'Charger le document',
-              fileName: _frontFile?.name,
-              enabled: !_saving,
-              onTap: () => _pickFile(isBack: false),
-            ),
-            if (_requiresBackFile) ...[
-              const SizedBox(height: 10),
-              _KycFilePickerTile(
-                label: 'Charger le verso',
-                fileName: _backFile?.name,
-                enabled: !_saving,
-                onTap: () => _pickFile(isBack: true),
               ),
             ],
-            const SizedBox(height: 18),
-            AppButton(
-              text: _saving ? 'Envoi...' : 'Envoyer ma pièce',
-              icon: Icons.verified_rounded,
-              onPressed: _saving || !_hasRequiredFiles
-                  ? null
-                  : () async {
-                      setState(() => _saving = true);
-                      try {
-                        final frontFile = _frontFile;
-                        final backFile = _backFile;
-                        if (frontFile == null) return;
+            if (canSubmit) ...[
+              const SizedBox(height: 16),
+              _NativeSelectField(
+                label: 'Type de pièce',
+                value: _documentType,
+                options: const [
+                  _NativeSelectOption(
+                    value: 'national_id',
+                    label: 'Carte Nationale d’Identité',
+                  ),
+                  _NativeSelectOption(value: 'passport', label: 'Passport'),
+                  _NativeSelectOption(
+                    value: 'driver_license',
+                    label: 'Permis de conduire',
+                  ),
+                ],
+                enabled: !_saving,
+                onChanged: (value) => setState(() {
+                  _documentType = value;
+                  if (!_requiresBackFile) _backFile = null;
+                }),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _documentType == 'national_id'
+                    ? 'Pièces à fournir : recto et verso de ta CNI.'
+                    : 'Pièce à fournir : photo lisible du document.',
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textHint,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _KycFilePickerTile(
+                label: _documentType == 'national_id'
+                    ? 'Charger le recto'
+                    : 'Charger le document',
+                fileName: _frontFile?.name,
+                enabled: !_saving,
+                onTap: () => _pickFile(isBack: false),
+              ),
+              if (_requiresBackFile) ...[
+                const SizedBox(height: 10),
+                _KycFilePickerTile(
+                  label: 'Charger le verso',
+                  fileName: _backFile?.name,
+                  enabled: !_saving,
+                  onTap: () => _pickFile(isBack: true),
+                ),
+              ],
+              const SizedBox(height: 18),
+              AppButton(
+                text: _saving ? 'Envoi...' : 'Envoyer ma pièce',
+                icon: Icons.verified_rounded,
+                onPressed: _saving || !_hasRequiredFiles
+                    ? null
+                    : () async {
+                        setState(() => _saving = true);
+                        try {
+                          final frontFile = _frontFile;
+                          final backFile = _backFile;
+                          if (frontFile == null) return;
 
-                        final frontUrl = await uploadPlayerKycDocument(
-                          bytes: await frontFile.readAsBytes(),
-                          fileName: frontFile.name,
-                          side: 'front',
-                        );
-                        final backUrl = _requiresBackFile && backFile != null
-                            ? await uploadPlayerKycDocument(
-                                bytes: await backFile.readAsBytes(),
-                                fileName: backFile.name,
-                                side: 'back',
-                              )
-                            : null;
+                          final frontUrl = await uploadPlayerKycDocument(
+                            bytes: await frontFile.readAsBytes(),
+                            fileName: frontFile.name,
+                            side: 'front',
+                          );
+                          final backUrl = _requiresBackFile && backFile != null
+                              ? await uploadPlayerKycDocument(
+                                  bytes: await backFile.readAsBytes(),
+                                  fileName: backFile.name,
+                                  side: 'back',
+                                )
+                              : null;
 
-                        await submitPlayerKycRequest(
-                          documentType: _documentType,
-                          documentFrontUrl: frontUrl,
-                          documentBackUrl: backUrl,
-                        );
-                        ref.invalidate(playerPaymentProfileProvider);
-                        if (context.mounted) Navigator.of(context).pop();
-                      } finally {
-                        if (mounted) setState(() => _saving = false);
-                      }
-                    },
-            ),
-          ] else ...[
-            const SizedBox(height: 18),
-            AppButton(
-              text: 'Compris',
-              icon: Icons.check_rounded,
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
+                          await submitPlayerKycRequest(
+                            documentType: _documentType,
+                            documentFrontUrl: frontUrl,
+                            documentBackUrl: backUrl,
+                          );
+                          ref.invalidate(playerPaymentProfileProvider);
+                          if (context.mounted) Navigator.of(context).pop();
+                        } finally {
+                          if (mounted) setState(() => _saving = false);
+                        }
+                      },
+              ),
+            ] else ...[
+              const SizedBox(height: 18),
+              AppButton(
+                text: 'Compris',
+                icon: Icons.check_rounded,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
           ],
         ),
       ),

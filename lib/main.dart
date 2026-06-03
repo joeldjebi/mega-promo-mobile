@@ -18,6 +18,7 @@ import 'src/features/leaderboard/providers/leaderboard_provider.dart';
 import 'src/features/notifications/providers/notifications_provider.dart';
 import 'src/features/profile/providers/player_payment_methods_provider.dart';
 import 'src/features/profile/providers/profile_provider.dart';
+import 'src/features/quiz/services/quiz_result_sync_service.dart';
 import 'src/features/rewards/providers/rewards_provider.dart';
 import 'src/features/subscriptions/providers/player_subscription_provider.dart';
 import 'src/services/app_telemetry_service.dart';
@@ -26,6 +27,7 @@ import 'src/services/device_telemetry_service.dart';
 import 'src/services/fcm_service.dart';
 import 'src/services/live_quiz_notification_service.dart';
 import 'src/services/synced_clock_service.dart';
+import 'src/widgets/network_status_banner.dart';
 
 Future<void> main() async {
   await runZonedGuarded<Future<void>>(
@@ -38,6 +40,7 @@ Future<void> main() async {
       await LiveQuizNotificationService.initialize();
       DeviceTelemetryService.initialize();
       DeviceSessionService.initialize();
+      unawaited(QuizResultSyncService.syncPending());
       if (firebaseReady) {
         unawaited(FcmService.initialize());
       }
@@ -101,6 +104,9 @@ class KonkourApp extends ConsumerWidget {
         title: 'MegaPromo',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
+        builder: (context, child) {
+          return NetworkStatusBanner(child: child ?? const SizedBox.shrink());
+        },
         routerConfig: router,
         scaffoldMessengerKey: scaffoldMessengerKey,
       ),
@@ -135,6 +141,7 @@ class _FcmLifecycleSyncState extends ConsumerState<FcmLifecycleSync>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(FcmService.syncTokenForCurrentUser(force: true));
+      unawaited(QuizResultSyncService.syncPending());
       ref.invalidate(playerPaymentProfileProvider);
     }
   }
