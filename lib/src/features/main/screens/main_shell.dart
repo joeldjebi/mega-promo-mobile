@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
@@ -31,8 +32,8 @@ class MainShell extends ConsumerStatefulWidget {
   static const List<_NavItem> _items = [
     _NavItem('/home', Icons.home_rounded, 'Accueil'),
     _NavItem('/contests', Icons.emoji_events_rounded, 'Jeux'),
-    _NavItem('/leaderboard', Icons.leaderboard_rounded, 'Classement'),
-    _NavItem('/rewards', Icons.card_giftcard_rounded, 'Récompenses'),
+    _NavItem('/leaderboard', Icons.leaderboard_rounded, 'Rang'),
+    _NavItem('/rewards', Icons.card_giftcard_rounded, 'Gains'),
     _NavItem('/profile', Icons.person_rounded, 'Profil'),
   ];
 
@@ -48,6 +49,7 @@ class _MainShellState extends ConsumerState<MainShell>
   DateTime? _backgroundedAt;
   Timer? _refreshDebounce;
   Timer? _foregroundSyncTimer;
+  bool _isBottomNavVisible = true;
 
   @override
   void initState() {
@@ -59,12 +61,46 @@ class _MainShellState extends ConsumerState<MainShell>
   Widget build(BuildContext context) {
     final authUser = ref.watch(authStateProvider).value;
     _syncMaintenanceRealtime(authUser?.id);
+    final location = GoRouterState.of(context).uri.path;
+    final shouldAutoHideBottomNav = location == '/home';
+    if (!shouldAutoHideBottomNav && !_isBottomNavVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _isBottomNavVisible = true);
+      });
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: widget.child,
-      bottomNavigationBar: const _MainBottomNav(),
+      body: shouldAutoHideBottomNav
+          ? NotificationListener<UserScrollNotification>(
+              onNotification: _handleUserScroll,
+              child: widget.child,
+            )
+          : widget.child,
+      bottomNavigationBar: _HideableBottomNav(
+        isVisible: shouldAutoHideBottomNav ? _isBottomNavVisible : true,
+        animate: shouldAutoHideBottomNav,
+      ),
     );
+  }
+
+  bool _handleUserScroll(UserScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical ||
+        notification.metrics.maxScrollExtent <= 0) {
+      return false;
+    }
+
+    final shouldShow = switch (notification.direction) {
+      ScrollDirection.forward => true,
+      ScrollDirection.reverse => false,
+      ScrollDirection.idle => _isBottomNavVisible,
+    };
+
+    if (shouldShow != _isBottomNavVisible) {
+      setState(() => _isBottomNavVisible = shouldShow);
+    }
+
+    return false;
   }
 
   void _syncMaintenanceRealtime(String? userId) {
@@ -369,11 +405,60 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 }
 
+class _HideableBottomNav extends StatelessWidget {
+  final bool isVisible;
+  final bool animate;
+
+  const _HideableBottomNav({required this.isVisible, required this.animate});
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final navHeight = 94.0 + bottomInset;
+
+    return AnimatedContainer(
+      duration: animate ? const Duration(milliseconds: 260) : Duration.zero,
+      curve: Curves.easeOutCubic,
+      height: isVisible ? navHeight : 0,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: OverflowBox(
+            alignment: Alignment.bottomCenter,
+            minHeight: navHeight,
+            maxHeight: navHeight,
+            child: SizedBox(
+              height: navHeight,
+              child: AnimatedSlide(
+                duration: animate
+                    ? const Duration(milliseconds: 260)
+                    : Duration.zero,
+                curve: Curves.easeOutCubic,
+                offset: isVisible ? Offset.zero : const Offset(0, 1.08),
+                child: AnimatedOpacity(
+                  duration: animate
+                      ? const Duration(milliseconds: 180)
+                      : Duration.zero,
+                  opacity: isVisible ? 1 : 0,
+                  child: const _MainBottomNav(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MainBottomNav extends StatelessWidget {
   const _MainBottomNav();
 
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
+    if (location.startsWith('/subscriptions')) {
+      return MainShell._items.indexWhere((item) => item.path == '/profile');
+    }
     final index = MainShell._items.indexWhere(
       (item) => location.startsWith(item.path),
     );
@@ -402,10 +487,10 @@ class _MainBottomNav extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Container(
-            height: 68,
-            padding: const EdgeInsets.all(6),
+            height: 74,
+            padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
               color: AppColors.background,
               borderRadius: BorderRadius.circular(24),
@@ -450,18 +535,18 @@ class _BottomNavItem extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(19),
+        borderRadius: BorderRadius.circular(21),
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 5),
           decoration: BoxDecoration(
             color: isSelected
                 ? AppColors.primary.withValues(alpha: 0.1)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(19),
+            borderRadius: BorderRadius.circular(21),
             border: Border.all(
               color: isSelected
                   ? AppColors.primary.withValues(alpha: 0.2)
@@ -475,27 +560,27 @@ class _BottomNavItem extends StatelessWidget {
               AnimatedContainer(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutCubic,
-                width: isSelected ? 20 : 5,
-                height: 3,
+                width: isSelected ? 24 : 6,
+                height: 3.5,
                 decoration: BoxDecoration(
                   color: isSelected ? AppColors.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 5.5),
               AnimatedScale(
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
-                scale: isSelected ? 1.08 : 0.94,
+                scale: isSelected ? 1.1 : 0.98,
                 child: Icon(
                   item.icon,
                   color: isSelected
                       ? AppColors.primary
                       : AppColors.textHint.withValues(alpha: 0.78),
-                  size: 21,
+                  size: 23,
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 3.5),
               Text(
                 item.label,
                 maxLines: 1,
@@ -505,7 +590,7 @@ class _BottomNavItem extends StatelessWidget {
                   color: isSelected
                       ? AppColors.primary
                       : AppColors.textHint.withValues(alpha: 0.82),
-                  fontSize: 11,
+                  fontSize: 13,
                   height: 1.05,
                   letterSpacing: 0,
                   fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,

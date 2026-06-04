@@ -413,7 +413,6 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   }
 
   bool get _isActionDisabled =>
-      _planAccessDenied ||
       (data.contest.isLive && !data.contest.isLiveReady) ||
       (data.contest.isLive && !data.contest.isLiveReservationOpen) ||
       data.contest.isLiveEnded ||
@@ -840,177 +839,47 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  _ContestDetailMetaRow(contest: contest),
-                  const SizedBox(height: 16),
-                  Text(contest.title, style: AppTextStyles.h1),
-                  const SizedBox(height: 10),
                   Text(
-                    _formatPrize(contest.prizeValue),
-                    style: AppTextStyles.price,
+                    contest.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.h2.copyWith(
+                      fontSize: 21,
+                      height: 1.12,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 20),
-                  AppCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _DetailStat(
-                            icon: Icons.groups_rounded,
-                            label: 'Participants',
-                            value: '${data.participantsCount}',
-                          ),
-                        ),
-                        const _StatDivider(),
-                        Expanded(
-                          child: _DetailStat(
-                            icon: Icons.workspace_premium_rounded,
-                            label: 'Lauréats',
-                            value: '${contest.winnersCount}',
-                          ),
-                        ),
-                        const _StatDivider(),
-                        Expanded(
-                          child: _DetailStat(
-                            icon: Icons.schedule_rounded,
-                            label: 'Temps',
-                            child: contest.isLive
-                                ? _LiveQuizDetailTime(contest: contest)
-                                : ContestTimer(
-                                    endsAt: contest.computedLiveEndsAt,
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _ContestScheduleCard(data: data),
+                  _ContestArenaSummary(data: data),
                   if (contest.isLive) ...[
                     const SizedBox(height: 14),
-                    AppCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.bolt_rounded,
-                            color: AppColors.accentGreen,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  data.hasLiveRegistration
-                                      ? 'Inscription confirmée'
-                                      : 'Quiz Live',
-                                  style: AppTextStyles.h3.copyWith(
-                                    color: AppColors.accentGreen,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _liveQuizInfoText(contest),
-                                  style: AppTextStyles.bodySecondary,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    _LiveQuizArenaCard(data: data),
                   ],
                   if (_planAccessDenied) ...[
                     const SizedBox(height: 14),
-                    AppCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.lock_rounded, color: AppColors.gold),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Ce quiz est réservé aux joueurs ${contest.accessLabel}. Ton forfait actuel est ${data.userProfile.planName}.',
-                              style: AppTextStyles.bodySecondary,
-                            ),
-                          ),
-                        ],
-                      ),
+                    _StatusNoticeCard(
+                      icon: Icons.lock_rounded,
+                      label: 'Accès ${contest.accessLabel}',
+                      color: AppColors.gold,
                     ),
                   ],
                   if (!contest.isLive &&
                       _dailyLimitReached &&
                       !data.hasParticipated) ...[
                     const SizedBox(height: 14),
-                    AppCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.workspace_premium_rounded,
-                            color: AppColors.gold,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Limite journalière atteinte',
-                                  style: AppTextStyles.h3.copyWith(
-                                    color: AppColors.gold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Tu as utilisé ${data.userProfile.participationsToday}/${data.userProfile.dailyParticipationLimit} participations aujourd’hui. Consulte les options disponibles pour continuer.',
-                                  style: AppTextStyles.bodySecondary,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                    _StatusNoticeCard(
+                      icon: Icons.workspace_premium_rounded,
+                      label:
+                          'Limite ${data.userProfile.participationsToday}/${data.userProfile.dailyParticipationLimit}',
+                      color: AppColors.gold,
                     ),
                   ],
                   if (data.hasParticipated) ...[
                     const SizedBox(height: 14),
-                    AppCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.check_circle_rounded,
-                            color: AppColors.accentGreen,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Déjà participé',
-                                  style: AppTextStyles.h3.copyWith(
-                                    color: AppColors.accentGreen,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Ta participation est enregistrée pour ce quiz.',
-                                  style: AppTextStyles.bodySecondary,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                    const _StatusNoticeCard(
+                      icon: Icons.check_circle_rounded,
+                      label: 'Participation enregistrée',
+                      color: AppColors.accentGreen,
                     ),
                   ],
                   if (data.userRanking != null) ...[
@@ -1020,27 +889,21 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                       ranking: data.userRanking!,
                     ),
                   ],
-                  const SizedBox(height: 26),
-                  Text('Description', style: AppTextStyles.h2),
-                  const SizedBox(height: 10),
-                  AppCard(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      contest.description,
-                      style: AppTextStyles.bodySecondary,
-                    ),
-                  ),
                   const SizedBox(height: 22),
-                  Text('La récompense', style: AppTextStyles.h2),
-                  const SizedBox(height: 10),
-                  AppCard(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      contest.prizeDescription.isEmpty
-                          ? 'Récompense surprise offerte par la marque partenaire.'
-                          : contest.prizeDescription,
-                      style: AppTextStyles.body,
-                    ),
+                  _PremiumInfoCard(
+                    icon: Icons.article_rounded,
+                    title: 'Description',
+                    body: contest.description,
+                    collapsible: true,
+                  ),
+                  const SizedBox(height: 14),
+                  _PremiumInfoCard(
+                    icon: Icons.workspace_premium_rounded,
+                    title: 'À gagner',
+                    body: contest.prizeDescription.isEmpty
+                        ? 'Récompense surprise offerte par la marque partenaire.'
+                        : contest.prizeDescription,
+                    accentColor: AppColors.gold,
                   ),
                   const SizedBox(height: 30),
                 ]),
@@ -1071,6 +934,8 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                   : null,
               onPressed: _isActionDisabled || _isActionRunning
                   ? null
+                  : _planAccessDenied
+                  ? () => _openSubscriptions(context)
                   : data.hasParticipated
                   ? data.contest.type == ContestType.quiz
                         ? () => _openMyQuizResult(context)
@@ -1198,45 +1063,127 @@ class _EndedLiveQuizDetail extends StatelessWidget {
   }
 }
 
-class _ContestScheduleCard extends StatelessWidget {
+class _ContestArenaSummary extends StatelessWidget {
   final ContestDetailData data;
 
-  const _ContestScheduleCard({required this.data});
+  const _ContestArenaSummary({required this.data});
 
   @override
   Widget build(BuildContext context) {
     final contest = data.contest;
-    final startsAt = contest.isLive ? contest.liveStartsAt : contest.startsAt;
-    final endsAt = contest.computedLiveEndsAt;
-    final winnerAnnouncementAt =
-        data.drawSettings?.winnerAnnouncementAt ?? endsAt;
+    final isLive = contest.isLive;
+    final accentColor = isLive ? AppColors.accentGreen : contest.type.color;
 
-    return AppCard(
+    return Container(
       padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isLive ? const Color(0xFF17113F) : AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: isLive
+              ? accentColor.withValues(alpha: 0.46)
+              : contest.type.color.withValues(alpha: 0.22),
+          width: isLive ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (isLive ? AppColors.primaryDark : Colors.black).withValues(
+              alpha: isLive ? 0.18 : 0.05,
+            ),
+            blurRadius: isLive ? 22 : 14,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Calendrier du jeu', style: AppTextStyles.h3),
-          const SizedBox(height: 12),
-          if (startsAt != null)
-            _ScheduleRow(
-              icon: contest.isLive
-                  ? Icons.play_circle_rounded
-                  : Icons.event_available_rounded,
-              label: contest.isLive ? 'Départ du QL' : 'Ouverture',
-              value: _shortDateTime(startsAt),
-            ),
-          _ScheduleRow(
-            icon: Icons.flag_circle_rounded,
-            label: 'Fin du jeu',
-            value: _shortDateTime(endsAt),
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: isLive ? 0.18 : 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: accentColor.withValues(alpha: 0.34),
+                  ),
+                ),
+                child: Icon(
+                  isLive ? Icons.bolt_rounded : contest.type.icon,
+                  color: isLive ? Colors.white : accentColor,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isLive ? 'Arena' : 'JCQ',
+                      style: AppTextStyles.h3.copyWith(
+                        color: isLive ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      isLive
+                          ? _liveQuizStatusLabel(contest)
+                          : 'Tirage aléatoire',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: isLive
+                            ? Colors.white.withValues(alpha: 0.72)
+                            : AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _ArenaTimePill(contest: contest, inverted: isLive),
+            ],
           ),
-          _ScheduleRow(
-            icon: Icons.emoji_events_rounded,
-            label: _winnerText(contest),
-            value: contest.isLive
-                ? 'À la fin du QL'
-                : _shortDateTime(winnerAnnouncementAt),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ArenaChip(
+                icon: Icons.groups_rounded,
+                label: '${data.participantsCount} joueurs',
+                color: accentColor,
+                inverted: isLive,
+              ),
+              _ArenaChip(
+                icon: Icons.workspace_premium_rounded,
+                label: _winnerText(contest),
+                color: AppColors.gold,
+                inverted: isLive,
+              ),
+              _ArenaChip(
+                icon: Icons.payments_rounded,
+                label: _formatPrize(contest.prizeValue),
+                color: AppColors.gold,
+                inverted: isLive,
+              ),
+              if (isLive)
+                _ArenaChip(
+                  icon: Icons.how_to_reg_rounded,
+                  label: '${contest.registeredCount} inscrits',
+                  color: AppColors.accentGreen,
+                  inverted: true,
+                )
+              else
+                _ArenaChip(
+                  icon: Icons.shuffle_rounded,
+                  label: 'Aléatoire',
+                  color: AppColors.primary,
+                ),
+            ],
           ),
         ],
       ),
@@ -1244,46 +1191,281 @@ class _ContestScheduleCard extends StatelessWidget {
   }
 }
 
-class _ScheduleRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
+class _LiveQuizArenaCard extends StatelessWidget {
+  final ContestDetailData data;
 
-  const _ScheduleRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
+  const _LiveQuizArenaCard({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
+    final contest = data.contest;
+    final isRegistered = data.hasLiveRegistration;
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.primaryLight, size: 19),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.accentGreen.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: AppColors.accentGreen.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.sports_esports_rounded,
+                  color: AppColors.accentGreen,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  isRegistered ? 'Réservé' : 'Arena',
+                  style: AppTextStyles.h3.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              if (isRegistered)
+                const Icon(
+                  Icons.verified_rounded,
+                  color: AppColors.accentGreen,
+                  size: 22,
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ArenaChip(
+                icon: Icons.quiz_rounded,
+                label: '5 Q',
+                color: AppColors.primary,
+              ),
+              _ArenaChip(
+                icon: Icons.timer_rounded,
+                label: '20 sec',
+                color: AppColors.primary,
+              ),
+              _ArenaChip(
+                icon: Icons.speed_rounded,
+                label: 'Vitesse',
+                color: AppColors.accentGreen,
+              ),
+              _ArenaChip(
+                icon: Icons.emoji_events_rounded,
+                label: _winnerText(contest),
+                color: AppColors.gold,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumInfoCard extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  final Color accentColor;
+  final bool collapsible;
+
+  const _PremiumInfoCard({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.accentColor = AppColors.primary,
+    this.collapsible = false,
+  });
+
+  @override
+  State<_PremiumInfoCard> createState() => _PremiumInfoCardState();
+}
+
+class _PremiumInfoCardState extends State<_PremiumInfoCard> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final canCollapse = widget.collapsible && widget.body.length > 180;
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: widget.accentColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: widget.accentColor.withValues(alpha: 0.24),
               ),
             ),
+            child: Icon(widget.icon, color: widget.accentColor, size: 20),
           ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w800),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.title, style: AppTextStyles.h3),
+                const SizedBox(height: 5),
+                Text(
+                  widget.body,
+                  maxLines: canCollapse && !_isExpanded ? 5 : null,
+                  overflow: canCollapse && !_isExpanded
+                      ? TextOverflow.ellipsis
+                      : TextOverflow.visible,
+                  style: AppTextStyles.bodySecondary.copyWith(height: 1.35),
+                ),
+                if (canCollapse) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 30),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () =>
+                          setState(() => _isExpanded = !_isExpanded),
+                      child: Text(_isExpanded ? 'Voir moins' : 'Voir plus'),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatusNoticeCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _StatusNoticeCard({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.body.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArenaChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool inverted;
+
+  const _ArenaChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.inverted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = inverted ? Colors.white : color;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: inverted
+            ? Colors.white.withValues(alpha: 0.1)
+            : color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: inverted
+              ? Colors.white.withValues(alpha: 0.18)
+              : color.withValues(alpha: 0.24),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: foreground, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: foreground,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArenaTimePill extends StatelessWidget {
+  final Contest contest;
+  final bool inverted;
+
+  const _ArenaTimePill({required this.contest, required this.inverted});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: inverted
+            ? Colors.white.withValues(alpha: 0.12)
+            : AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: inverted
+              ? Colors.white.withValues(alpha: 0.22)
+              : AppColors.surfaceBorder,
+        ),
+      ),
+      child: contest.isLive
+          ? _LiveQuizDetailTime(contest: contest, inverted: inverted)
+          : ContestTimer(endsAt: contest.computedLiveEndsAt),
     );
   }
 }
@@ -1575,7 +1757,7 @@ class _DrawParticipationSheetState
 
 int _drawTickets(ContestDetailData data) {
   final baseTickets = data.drawSettings?.standardTickets ?? 1;
-  return baseTickets + data.userProfile.bonusTickets;
+  return (baseTickets + data.userProfile.bonusTickets).toInt();
 }
 
 String _formatLiveQuizError(Object error) {
@@ -2269,9 +2451,26 @@ class _ContestHeroImage extends StatelessWidget {
               ),
             ),
           ),
+          if (contest.brandLogoUrl?.isNotEmpty == true)
+            Positioned(
+              left: 20,
+              bottom: 18,
+              child: _HeroBrandLogo(url: contest.brandLogoUrl!),
+            ),
         ],
       ),
     );
+  }
+}
+
+class _HeroBrandLogo extends StatelessWidget {
+  final String url;
+
+  const _HeroBrandLogo({required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    return _BrandLogoImage(url: url, size: 58);
   }
 }
 
@@ -2414,82 +2613,6 @@ class _HeroActionButton extends StatelessWidget {
   }
 }
 
-class _ContestDetailMetaRow extends StatelessWidget {
-  final Contest contest;
-
-  const _ContestDetailMetaRow({required this.contest});
-
-  @override
-  Widget build(BuildContext context) {
-    final hasBrand = contest.brandLogoUrl?.isNotEmpty == true;
-    final badges = Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        _TypeBadge(type: contest.type),
-        if (contest.allowedPlayerPlanKeys.isNotEmpty)
-          _AccessBadge(label: contest.accessLabel),
-      ],
-    );
-
-    if (!hasBrand) return badges;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Flexible(
-          flex: 4,
-          child: Align(alignment: Alignment.centerLeft, child: badges),
-        ),
-        const SizedBox(width: 10),
-        Flexible(
-          flex: 6,
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: _ContestBrandLogoLine(contest: contest, fillWidth: true),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ContestBrandLogoLine extends StatelessWidget {
-  final Contest contest;
-  final bool fillWidth;
-
-  const _ContestBrandLogoLine({required this.contest, this.fillWidth = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final logoUrl = contest.brandLogoUrl;
-    if (logoUrl == null || logoUrl.isEmpty) return const SizedBox.shrink();
-
-    return Row(
-      mainAxisSize: fillWidth ? MainAxisSize.max : MainAxisSize.min,
-      children: [
-        _BrandLogoImage(url: logoUrl, size: 38),
-        if (contest.brandName?.trim().isNotEmpty == true) ...[
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              contest.brandName!.trim(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySmall.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.15,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
 class _BrandLogoImage extends StatelessWidget {
   final String url;
   final double size;
@@ -2525,74 +2648,15 @@ class _BrandLogoImage extends StatelessWidget {
   }
 }
 
-class _TypeBadge extends StatelessWidget {
-  final ContestType type;
-
-  const _TypeBadge({required this.type});
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: type.color.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: type.color.withValues(alpha: 0.38)),
-        ),
-        child: Text(
-          type.label,
-          style: AppTextStyles.label.copyWith(color: type.color),
-        ),
-      ),
-    );
-  }
-}
-
-class _AccessBadge extends StatelessWidget {
-  final String label;
-
-  const _AccessBadge({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: AppColors.gold.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.gold.withValues(alpha: 0.34)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.lock_rounded, color: AppColors.gold, size: 13),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: AppTextStyles.label.copyWith(
-              color: AppColors.gold,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _DetailStat extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String? value;
-  final Widget? child;
+  final String value;
 
   const _DetailStat({
     required this.icon,
     required this.label,
-    this.value,
-    this.child,
+    required this.value,
   });
 
   @override
@@ -2603,7 +2667,7 @@ class _DetailStat extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label, style: AppTextStyles.bodySmall),
         const SizedBox(height: 4),
-        child ?? Text(value ?? '-', style: AppTextStyles.h3),
+        Text(value, style: AppTextStyles.h3),
       ],
     );
   }
@@ -2611,19 +2675,27 @@ class _DetailStat extends StatelessWidget {
 
 class _LiveQuizDetailTime extends StatelessWidget {
   final Contest contest;
+  final bool inverted;
 
-  const _LiveQuizDetailTime({required this.contest});
+  const _LiveQuizDetailTime({required this.contest, this.inverted = false});
 
   @override
   Widget build(BuildContext context) {
+    final baseColor = inverted ? Colors.white : AppColors.textPrimary;
     final liveStartsAt = contest.liveStartsAt;
     if (liveStartsAt == null) {
-      return Text('À confirmer', style: AppTextStyles.h3);
+      return Text(
+        'À confirmer',
+        style: AppTextStyles.h3.copyWith(color: baseColor),
+      );
     }
 
     final now = SyncedClockService.now();
     if (contest.isLiveEnded) {
-      return Text('Terminé', style: AppTextStyles.h3);
+      return Text(
+        'Terminé',
+        style: AppTextStyles.h3.copyWith(color: baseColor),
+      );
     }
     if (contest.isLiveActiveNow) {
       return Text(
@@ -2633,12 +2705,20 @@ class _LiveQuizDetailTime extends StatelessWidget {
     }
     if (!now.isBefore(liveStartsAt)) {
       return Text(
-        'En attente du tour',
-        style: AppTextStyles.h3.copyWith(color: AppColors.primary),
+        'Bientôt',
+        style: AppTextStyles.h3.copyWith(
+          color: inverted ? Colors.white : AppColors.primary,
+        ),
       );
     }
 
-    return ContestTimer(endsAt: liveStartsAt);
+    return ContestTimer(
+      endsAt: liveStartsAt,
+      style: AppTextStyles.h3.copyWith(
+        color: baseColor,
+        fontWeight: FontWeight.w900,
+      ),
+    );
   }
 }
 
@@ -2780,23 +2860,17 @@ String _winnerText(Contest contest) {
       : '1 lauréat';
 }
 
-String _winnerDesignationText(Contest contest) {
-  if (AppStoreReviewMode.enabled) {
-    return contest.winnersCount > 1
-        ? '${contest.winnersCount} récompenses prévues'
-        : '1 récompense prévue';
-  }
-  return contest.winnersCount > 1
-      ? '${contest.winnersCount} lauréats désignés'
-      : '1 lauréat désigné';
+String _liveQuizStatusLabel(Contest contest) {
+  if (!contest.isLiveReady) return 'Préparation';
+  if (contest.isLiveActiveNow) return 'En direct maintenant';
+  if (contest.isLiveWaitingStatus) return 'Salle ouverte';
+  if (contest.isLiveQueued) return 'File QL';
+  final liveStartsAt = contest.liveStartsAt;
+  if (liveStartsAt == null) return 'Départ à confirmer';
+  return 'Départ ${_shortClockTime(liveStartsAt)}';
 }
 
-String _liveQuizInfoText(Contest contest) {
-  final liveStartsAt = contest.liveStartsAt;
-  if (liveStartsAt == null) {
-    return 'L’heure de départ sera confirmée bientôt.';
-  }
-
-  return 'Départ ${_shortDateTime(liveStartsAt)}. Fin ${_shortDateTime(contest.computedLiveEndsAt)}. '
-      '${_winnerDesignationText(contest)} à la fin. ${contest.registeredCount} joueur(s) inscrit(s).';
+String _shortClockTime(DateTime date) {
+  return '${date.hour.toString().padLeft(2, '0')}:'
+      '${date.minute.toString().padLeft(2, '0')}';
 }

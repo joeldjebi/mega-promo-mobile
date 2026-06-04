@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../firebase_options.dart';
@@ -38,6 +39,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 class FcmService {
   FcmService._();
 
+  static const _pushEnabledPreferenceKey = 'mega_promo_push_enabled';
+
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static bool _isInitialized = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
@@ -46,6 +49,7 @@ class FcmService {
   static Timer? _syncRetryTimer;
   static Timer? _winnerNavigationTimer;
   static int _syncRetryAttempt = 0;
+  static bool _runtimeListenersStarted = false;
   static String? _lastWinnerNavigationId;
   static DateTime? _lastWinnerNavigationAt;
 
@@ -63,18 +67,26 @@ class FcmService {
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
+    if (!await _isPushEnabledLocally()) {
+      debugPrint('[FCM][init] skipped: push disabled by user preference');
+      return;
+    }
+
     await _requestPermission();
     await _configureForegroundPresentation();
     await syncTokenForCurrentUser(force: true);
-    _listenTokenRefresh();
-    _listenForegroundMessages();
-    _listenNotificationTaps();
+    _startRuntimeListeners();
     await _handleInitialMessage();
   }
 
   static Future<void> syncTokenForCurrentUser({bool force = false}) async {
     if (Firebase.apps.isEmpty) {
       debugPrint('[FCM][sync] skipped: Firebase is not initialized');
+      return;
+    }
+    if (!await _isPushEnabledLocally()) {
+      debugPrint('[FCM][sync] skipped: push disabled by user preference');
+      _cancelSyncRetry();
       return;
     }
     if (!NetworkStatusService.instance.canAttemptNetwork) {
@@ -176,6 +188,46 @@ class FcmService {
     await _stopInAppNotifications();
   }
 
+  static Future<bool> arePushNotificationsEnabled() async {
+    if (!await _isPushEnabledLocally()) return false;
+    if (Firebase.apps.isEmpty) return false;
+    final settings = await _messaging.getNotificationSettings();
+    return _isAuthorized(settings.authorizationStatus);
+  }
+
+  static Future<bool> setPushNotificationsEnabled(bool enabled) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_pushEnabledPreferenceKey, enabled);
+
+    if (!enabled) {
+      _cancelSyncRetry();
+      await _clearTokenForCurrentUser();
+      await _deleteDeviceToken();
+      return false;
+    }
+
+    if (Firebase.apps.isEmpty) return false;
+    final settings = await _requestPermission();
+    final isAuthorized = _isAuthorized(settings.authorizationStatus);
+    if (!isAuthorized) {
+      await preferences.setBool(_pushEnabledPreferenceKey, false);
+      return false;
+    }
+
+    await _configureForegroundPresentation();
+    await syncTokenForCurrentUser(force: true);
+    _startRuntimeListeners();
+    return true;
+  }
+
+  static void _startRuntimeListeners() {
+    if (_runtimeListenersStarted) return;
+    _runtimeListenersStarted = true;
+    _listenTokenRefresh();
+    _listenForegroundMessages();
+    _listenNotificationTaps();
+  }
+
   static void _scheduleSyncRetry({bool force = false, bool offline = false}) {
     if (_syncRetryTimer?.isActive == true) return;
     if (!force && _syncRetryAttempt >= 12) return;
@@ -200,7 +252,60 @@ class FcmService {
     _syncRetryAttempt = 0;
   }
 
-  static Future<void> _requestPermission() async {
+  static Future<bool> _isPushEnabledLocally() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_pushEnabledPreferenceKey) ?? true;
+  }
+
+  static bool _isAuthorized(AuthorizationStatus status) {
+    return status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional;
+  }
+
+  static Future<void> _clearTokenForCurrentUser() async {
+    final user = Supabase.instance.client.auth.currentSession?.user;
+    if (user == null) return;
+
+    try {
+      await Supabase.instance.client
+          .from('users')
+          .update({
+            'fcm_token': null,
+            'fcm_token_platform': null,
+            'fcm_token_updated_at': DateTime.now().toIso8601String(),
+            'fcm_token_last_error': null,
+            'fcm_token_last_error_at': null,
+          })
+          .eq('id', user.id);
+    } catch (error, stackTrace) {
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'fcm_token_clear_failed',
+          context: {'platform': defaultTargetPlatform.name},
+        ),
+      );
+    }
+  }
+
+  static Future<void> _deleteDeviceToken() async {
+    if (Firebase.apps.isEmpty) return;
+    try {
+      await _messaging.deleteToken();
+    } catch (error, stackTrace) {
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'fcm_device_token_delete_failed',
+          context: {'platform': defaultTargetPlatform.name},
+        ),
+      );
+    }
+  }
+
+  static Future<NotificationSettings> _requestPermission() async {
     final settings = await _messaging.requestPermission(
       alert: true,
       badge: true,
@@ -212,6 +317,7 @@ class FcmService {
       'alert=${settings.alert.name} badge=${settings.badge.name} '
       'sound=${settings.sound.name} announcement=${settings.announcement.name}',
     );
+    return settings;
   }
 
   static Future<void> _configureForegroundPresentation() async {
@@ -247,6 +353,10 @@ class FcmService {
   static void _listenTokenRefresh() {
     _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) async {
+      if (!await _isPushEnabledLocally()) {
+        debugPrint('[FCM][refresh] skipped: push disabled by user preference');
+        return;
+      }
       final user = Supabase.instance.client.auth.currentSession?.user;
       if (user == null) return;
       if (!NetworkStatusService.instance.canAttemptNetwork) {

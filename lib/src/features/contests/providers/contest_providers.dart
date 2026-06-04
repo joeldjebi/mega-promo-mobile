@@ -34,15 +34,10 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   ref.watch(appFeatureFlagsProvider);
   final supabase = ref.watch(supabaseProvider);
   final bootstrap = ref.watch(homeBootstrapProvider).value;
-  final userPlanKey =
-      bootstrap?.profile.planKey ??
-      ref.watch(userProfileProvider).value?.planKey ??
-      'free';
   authLogPayload('contestsStream', {
     'table': 'contests',
     'filter': {'status': 'active', 'liveEndedWindow': 'same-day'},
     'order': 'starts_at asc',
-    'playerPlan': userPlanKey,
   });
 
   var lastGoodContests = const <Contest>[];
@@ -51,7 +46,6 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
     lastGoodContests = _sortContests(
       bootstrapContests
           .where(_isVisibleForAppStoreReview)
-          .where((contest) => contest.isAccessibleForPlan(userPlanKey))
           .where((contest) => !contest.isLive || contest.isLiveReady)
           .toList(),
     );
@@ -66,7 +60,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   await _processLiveQuizEvents(supabase);
 
   try {
-    lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
+    lastGoodContests = await _loadContestsSnapshot(supabase);
     yield lastGoodContests;
   } catch (error, stackTrace) {
     NetworkStatusService.instance.markOfflineFromError(error);
@@ -92,7 +86,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
         authLogResponse('contestsStream', {'count': rows.length});
         await _processLiveQuizEvents(supabase);
         try {
-          lastGoodContests = await _loadContestsSnapshot(supabase, userPlanKey);
+          lastGoodContests = await _loadContestsSnapshot(supabase);
           return lastGoodContests;
         } catch (error, stackTrace) {
           NetworkStatusService.instance.markOfflineFromError(error);
@@ -114,10 +108,7 @@ final contestsProvider = StreamProvider<List<Contest>>((ref) async* {
   });
 });
 
-Future<List<Contest>> _loadContestsSnapshot(
-  dynamic supabase,
-  String userPlanKey,
-) async {
+Future<List<Contest>> _loadContestsSnapshot(dynamic supabase) async {
   final rows = await _fetchContestsWithLiveDuration(supabase);
   final now = SyncedClockService.now();
   final contests = rows
@@ -127,7 +118,6 @@ Future<List<Contest>> _loadContestsSnapshot(
         return contest.status == 'active' && contest.endsAt.isAfter(now);
       })
       .where(_isVisibleForAppStoreReview)
-      .where((contest) => contest.isAccessibleForPlan(userPlanKey))
       .toList();
   return _sortContests(contests);
 }

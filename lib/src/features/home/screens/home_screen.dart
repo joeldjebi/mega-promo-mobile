@@ -42,6 +42,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _selectedCategoryId;
   Timer? _liveTicker;
+  DateTime? _nextLiveAutoRefreshAt;
+  DateTime? _lastLiveAutoRefreshAt;
   String? _preloadedContestAssetsKey;
   UserProfile? _lastProfile;
   List<Contest>? _lastContests;
@@ -51,9 +53,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _liveTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
+    _liveTicker = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _handleLiveTicker(),
+    );
+  }
+
+  void _handleLiveTicker() {
+    if (!mounted) return;
+    final now = SyncedClockService.now();
+    final nextRefreshAt = _nextLiveAutoRefreshAt;
+    if (nextRefreshAt != null && !now.isBefore(nextRefreshAt)) {
+      final alreadyRefreshedAt = _lastLiveAutoRefreshAt;
+      if (alreadyRefreshedAt == null ||
+          nextRefreshAt.isAfter(alreadyRefreshedAt)) {
+        _lastLiveAutoRefreshAt = nextRefreshAt;
+        ref
+          ..invalidate(homeBootstrapProvider)
+          ..invalidate(contestsProvider)
+          ..invalidate(categoriesProvider)
+          ..invalidate(userRegisteredLiveQuizIdsProvider);
+      }
+    }
+    setState(() {});
   }
 
   @override
@@ -105,11 +127,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             categories.value ?? const <Category>[],
             _lastContests!,
           );
-    final hasLiveQuizInCurrentView = _hasLiveQuizForCurrentView(
-      _lastContests,
-      categories.value ?? const <Category>[],
-      _selectedCategoryId,
-    );
+    final hasLiveQuizInCurrentView = _hasLiveQuizForCurrentView(_lastContests);
     final topBackgroundHeight = hasLiveQuizInCurrentView
         ? _homeTopBackgroundHeight
         : visibleCategories.isNotEmpty
@@ -200,7 +218,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       if (filtered.isEmpty) return const _EmptyContestsState();
 
                       final liveQuizzes =
-                          filtered
+                          items
                               .where((contest) => contest.isLiveVisibleOnHome)
                               .toList()
                             ..sort((a, b) {
@@ -223,6 +241,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   b.computedLiveEndsAt;
                               return aDate.compareTo(bDate);
                             });
+                      _nextLiveAutoRefreshAt = _nextLiveTransitionAt(
+                        liveQuizzes,
+                      );
+                      final highlightedLiveQuiz = _highlightedLiveQuiz(
+                        liveQuizzes,
+                      );
                       final boosted = shuffleContestsForSession(
                         filtered.where(
                           (contest) => contest.isBoosted && !contest.isLive,
@@ -247,44 +271,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                             const SizedBox(height: 16),
                           ],
-                          if (liveQuizzes.isNotEmpty) ...[
+                          if (highlightedLiveQuiz != null) ...[
                             Text(
-                              'QUIZ LIVE',
+                              'LIVE',
                               style: AppTextStyles.label.copyWith(
                                 color: _homeOnBackgroundColor,
                               ),
                             ),
                             const SizedBox(height: 10),
-                            SizedBox(
-                              height: 214,
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final itemWidth = liveQuizzes.length == 1
-                                      ? constraints.maxWidth
-                                      : 318.0;
-                                  return ListView.separated(
-                                    scrollDirection: Axis.horizontal,
-                                    clipBehavior: Clip.none,
-                                    itemCount: liveQuizzes.length,
-                                    separatorBuilder: (_, _) =>
-                                        const SizedBox(width: 10),
-                                    itemBuilder: (context, index) {
-                                      final contest = liveQuizzes[index];
-                                      return SizedBox(
-                                        width: itemWidth,
-                                        child: _LiveQuizCard(
-                                          contest: contest,
-                                          hasParticipated:
-                                              participatedContestIds.contains(
-                                                contest.id,
-                                              ),
-                                          isRegistered: registeredLiveQuizIds
-                                              .contains(contest.id),
-                                        ),
-                                      );
-                                    },
-                                  );
-                                },
+                            _LiveQuizCard(
+                              contest: highlightedLiveQuiz,
+                              hasParticipated: participatedContestIds.contains(
+                                highlightedLiveQuiz.id,
+                              ),
+                              isRegistered: registeredLiveQuizIds.contains(
+                                highlightedLiveQuiz.id,
                               ),
                             ),
                             const SizedBox(height: 10),
@@ -302,7 +303,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ),
                           if (boosted.isNotEmpty) ...[
                             const SizedBox(height: 10),
-                            const _HomeSectionLabel('EN VEDETTE'),
+                            const _HomeSectionLabel('BOOSTÉS'),
                             const SizedBox(height: 10),
                             LayoutBuilder(
                               builder: (context, constraints) {
@@ -310,11 +311,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   context,
                                 ).scale(1);
                                 final featuredHeight =
-                                    248.0 +
-                                    (math.max(0.0, textScale - 1) * 172.0);
+                                    216.0 +
+                                    (math.max(0.0, textScale - 1) * 132.0);
                                 final itemWidth = boosted.length == 1
                                     ? constraints.maxWidth
-                                    : 274.0;
+                                    : math.min(304.0, constraints.maxWidth);
                                 return SizedBox(
                                   height: featuredHeight,
                                   child: ListView.separated(
@@ -322,7 +323,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     clipBehavior: Clip.none,
                                     itemCount: boosted.length,
                                     separatorBuilder: (_, _) =>
-                                        const SizedBox(width: 10),
+                                        const SizedBox(width: 12),
                                     itemBuilder: (context, index) {
                                       return _FeaturedContestCard(
                                         width: itemWidth,
@@ -337,7 +338,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                             const SizedBox(height: 18),
                           ],
-                          const _HomeSectionLabel('TOUS LES CONCOURS'),
+                          const _HomeSectionLabel('CONCOURS'),
                           const SizedBox(height: 10),
                           ...allContests
                               .take(10)
@@ -421,27 +422,46 @@ List<Category> _categoriesWithContests(
       .toList(growable: false);
 }
 
-bool _hasLiveQuizForCurrentView(
-  List<Contest>? contests,
-  List<Category> categories,
-  String? selectedCategoryId,
-) {
+bool _hasLiveQuizForCurrentView(List<Contest>? contests) {
   if (contests == null || contests.isEmpty) return false;
+  return contests.any(
+    (contest) =>
+        contest.isLiveVisibleOnHome &&
+        !contest.isLiveQueued &&
+        !contest.isLiveEnded,
+  );
+}
 
-  final availableCategories = _categoriesWithContests(categories, contests);
-  final effectiveCategoryId =
-      availableCategories.any((category) => category.id == selectedCategoryId)
-      ? selectedCategoryId
-      : null;
-  final filtered = effectiveCategoryId == null
-      ? contests
-      : contests
-            .where(
-              (contest) => _contestCategoryId(contest) == effectiveCategoryId,
-            )
-            .toList(growable: false);
+Contest? _highlightedLiveQuiz(List<Contest> liveQuizzes) {
+  if (liveQuizzes.isEmpty) return null;
+  final playableLiveQuizzes = liveQuizzes
+      .where((contest) => !contest.isLiveQueued && !contest.isLiveEnded)
+      .toList(growable: false);
+  if (playableLiveQuizzes.isNotEmpty) return playableLiveQuizzes.first;
+  return null;
+}
 
-  return filtered.any((contest) => contest.isLiveVisibleOnHome);
+DateTime? _nextLiveTransitionAt(List<Contest> liveQuizzes) {
+  final now = SyncedClockService.now();
+  DateTime? nextTransitionAt;
+
+  for (final contest in liveQuizzes) {
+    final startsAt = contest.liveStartsAt;
+    final endsAt = contest.computedLiveEndsAt;
+    final candidates = <DateTime>[
+      if (startsAt != null && startsAt.isAfter(now)) startsAt,
+      if (endsAt.isAfter(now)) endsAt,
+    ];
+
+    for (final candidate in candidates) {
+      if (nextTransitionAt == null || candidate.isBefore(nextTransitionAt)) {
+        nextTransitionAt = candidate;
+      }
+    }
+  }
+
+  if (nextTransitionAt == null) return null;
+  return nextTransitionAt.add(const Duration(seconds: 1));
 }
 
 String? _contestCategoryId(Contest contest) {
@@ -454,6 +474,51 @@ String _contestCategoryLabel(Contest contest) {
     return category;
   }
   return contest.type.filterLabel;
+}
+
+List<_GamingBadgeData> _contestGamingBadges(
+  Contest contest, {
+  required bool hasParticipated,
+}) {
+  final badges = <_GamingBadgeData>[];
+
+  if (hasParticipated) {
+    badges.add(
+      const _GamingBadgeData(
+        icon: Icons.check_circle_rounded,
+        label: 'JOUÉ',
+        color: AppColors.accentGreen,
+      ),
+    );
+  } else if (contest.isBoosted) {
+    badges.add(
+      const _GamingBadgeData(
+        icon: Icons.bolt_rounded,
+        label: 'BOOST',
+        color: AppColors.primary,
+      ),
+    );
+  }
+
+  badges.add(
+    _GamingBadgeData(
+      icon: contest.winnersCount > 1
+          ? Icons.emoji_events_rounded
+          : Icons.workspace_premium_rounded,
+      label: contest.winnersCount > 1 ? '${contest.winnersCount} WINS' : 'PRIX',
+      color: AppColors.gold,
+    ),
+  );
+
+  badges.add(
+    _GamingBadgeData(
+      icon: contest.type.icon,
+      label: contest.type.filterLabel.toUpperCase(),
+      color: contest.type.color,
+    ),
+  );
+
+  return badges.take(3).toList(growable: false);
 }
 
 class _HomeCategoryFilters extends StatelessWidget {
@@ -490,8 +555,6 @@ class _HomeCategoryFilters extends StatelessWidget {
               final isSelected = category == null
                   ? selectedCategoryId == null
                   : selectedCategoryId == category.id;
-              final accentColor = category?.color ?? AppColors.primary;
-
               return InkWell(
                 onTap: () => onSelected(category?.id),
                 borderRadius: BorderRadius.circular(999),
@@ -815,7 +878,7 @@ class _FeaturedContestCard extends StatelessWidget {
   final bool hasParticipated;
 
   const _FeaturedContestCard({
-    this.width = 274,
+    this.width = 304,
     required this.contest,
     required this.hasParticipated,
   });
@@ -835,14 +898,14 @@ class _FeaturedContestCard extends StatelessWidget {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.20),
-            width: 1,
+            color: AppColors.primaryLight.withValues(alpha: 0.24),
+            width: 1.1,
           ),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
-              color: AppColors.subtleShadow,
+              color: AppColors.primaryDark.withValues(alpha: 0.08),
               blurRadius: 14,
-              offset: Offset(0, 7),
+              offset: const Offset(0, 7),
             ),
           ],
         ),
@@ -863,14 +926,15 @@ class _FeaturedContestCard extends StatelessWidget {
                           runSpacing: 5,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            hasParticipated
-                                ? const _ParticipatedBadge()
-                                : const _SponsoredBadge(),
+                            ..._contestGamingBadges(
+                              contest,
+                              hasParticipated: hasParticipated,
+                            ).map(_GamingBadge.new),
                             if (contest.brandLogoUrl?.isNotEmpty == true)
                               _BrandLogo(url: contest.brandLogoUrl!, size: 24),
                             Container(
                               constraints: BoxConstraints(
-                                maxWidth: math.min(width - 24, 178),
+                                maxWidth: math.min(width - 24, 220),
                               ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 7,
@@ -880,7 +944,7 @@ class _FeaturedContestCard extends StatelessWidget {
                                 color: AppColors.surfaceElevated,
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: AppColors.gold.withValues(alpha: 0.28),
+                                  color: AppColors.gold.withValues(alpha: 0.24),
                                 ),
                               ),
                               child: Row(
@@ -922,36 +986,10 @@ class _FeaturedContestCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: AppTextStyles.price.copyWith(fontSize: 19.5),
                         ),
-                        const SizedBox(height: 7),
-                        Container(height: 1, color: AppColors.separator),
-                        const SizedBox(height: 7),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _FeaturedMeta(
-                                icon: Icons.visibility_rounded,
-                                value: '${contest.viewsCount} vues',
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: _FeaturedMeta(
-                                icon: Icons.workspace_premium_rounded,
-                                value: '${contest.winnersCount} gagnants',
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.textSecondary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        const SizedBox(height: 8),
+                        _FeaturedMeta(
+                          icon: Icons.workspace_premium_rounded,
+                          value: _winnerText(contest),
                         ),
                       ],
                     ),
@@ -972,9 +1010,7 @@ class _FeaturedContestCard extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text(
-                        hasParticipated
-                            ? 'Déjà joué · Voir détails'
-                            : 'Participer',
+                        hasParticipated ? 'Détails' : 'Participer',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1024,7 +1060,7 @@ class _LiveQuizCard extends StatelessWidget {
     final isWaiting = contest.isLiveWaitingStatus;
     final isQueued = contest.isLiveQueued;
     final isDisabledPreview = isEnded || isQueued;
-    final statusColor = isEnded
+    final arenaColor = isEnded
         ? AppColors.textHint
         : isActiveNow
         ? AppColors.accentGreen
@@ -1032,13 +1068,13 @@ class _LiveQuizCard extends StatelessWidget {
         ? AppColors.primary
         : isQueued
         ? AppColors.textHint
-        : AppColors.primary;
+        : AppColors.primaryLight;
     final statusText = isEnded
         ? 'TERMINÉ'
         : isActiveNow
         ? 'EN DIRECT'
         : isWaiting
-        ? 'PROCHAIN QL'
+        ? 'ARÈNE OUVERTE'
         : isQueued
         ? 'EN ATTENTE'
         : 'À VENIR';
@@ -1046,52 +1082,95 @@ class _LiveQuizCard extends StatelessWidget {
         ? 'Heure à confirmer'
         : '${liveStartsAt.hour.toString().padLeft(2, '0')}:'
               '${liveStartsAt.minute.toString().padLeft(2, '0')}';
+    final ctaText = isEnded
+        ? 'Terminé'
+        : isQueued
+        ? 'Détails'
+        : isActiveNow || isRegistered
+        ? 'Entrer'
+        : isWaiting
+        ? 'Réserver'
+        : 'Ouvrir';
 
     return InkWell(
       onTap: isEnded ? null : () => context.push('/contests/${contest.id}'),
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(26),
       child: Opacity(
         opacity: isDisabledPreview ? 0.68 : 1,
         child: Container(
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: isDisabledPreview
-                ? AppColors.surface
-                : AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(24),
+                ? const Color(0xFFF6F7FB)
+                : const Color(0xFF17113F),
+            borderRadius: BorderRadius.circular(26),
             border: Border.all(
-              color: isDisabledPreview ? AppColors.surfaceBorder : statusColor,
-              width: isDisabledPreview ? 1.5 : 3,
+              color: isDisabledPreview
+                  ? AppColors.surfaceBorder
+                  : arenaColor.withValues(alpha: 0.72),
+              width: isDisabledPreview ? 1.4 : 2.4,
             ),
             boxShadow: isDisabledPreview
                 ? const []
                 : [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.07),
-                      blurRadius: 18,
-                      offset: const Offset(0, 10),
+                      color: AppColors.primaryDark.withValues(alpha: 0.34),
+                      blurRadius: 26,
+                      offset: const Offset(0, 16),
                     ),
                     BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.08),
-                      blurRadius: 26,
-                      offset: const Offset(0, 14),
+                      color: arenaColor.withValues(alpha: 0.22),
+                      blurRadius: 34,
+                      offset: const Offset(0, 18),
                     ),
                   ],
           ),
           child: Stack(
             children: [
               Positioned(
-                right: 14,
-                top: 62,
+                right: -28,
+                top: -36,
                 child: Icon(
-                  Icons.grid_4x4_rounded,
-                  color: AppColors.primary.withValues(
-                    alpha: isDisabledPreview ? 0.025 : 0.08,
+                  Icons.blur_circular_rounded,
+                  color: Colors.white.withValues(
+                    alpha: isDisabledPreview ? 0.06 : 0.13,
                   ),
-                  size: 72,
+                  size: 140,
+                ),
+              ),
+              Positioned(
+                left: -38,
+                bottom: -44,
+                child: Container(
+                  width: 130,
+                  height: 130,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(
+                        alpha: isDisabledPreview ? 0.05 : 0.11,
+                      ),
+                      width: 18,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 18,
+                bottom: 76,
+                child: Transform.rotate(
+                  angle: -0.12,
+                  child: Icon(
+                    Icons.sports_esports_rounded,
+                    color: Colors.white.withValues(
+                      alpha: isDisabledPreview ? 0.06 : 0.16,
+                    ),
+                    size: 86,
+                  ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(13),
+                padding: const EdgeInsets.all(15),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1103,10 +1182,14 @@ class _LiveQuizCard extends StatelessWidget {
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: statusColor.withValues(alpha: 0.10),
+                            color: Colors.white.withValues(
+                              alpha: isDisabledPreview ? 0.72 : 0.14,
+                            ),
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(
-                              color: statusColor.withValues(alpha: 0.26),
+                              color: arenaColor.withValues(
+                                alpha: isDisabledPreview ? 0.24 : 0.58,
+                              ),
                             ),
                           ),
                           child: Row(
@@ -1116,15 +1199,23 @@ class _LiveQuizCard extends StatelessWidget {
                                 width: 7,
                                 height: 7,
                                 decoration: BoxDecoration(
-                                  color: statusColor,
+                                  color: arenaColor,
                                   shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: arenaColor.withValues(alpha: 0.65),
+                                      blurRadius: 10,
+                                    ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 statusText,
                                 style: AppTextStyles.label.copyWith(
-                                  color: statusColor,
+                                  color: isDisabledPreview
+                                      ? arenaColor
+                                      : Colors.white,
                                   fontSize: 10.5,
                                 ),
                               ),
@@ -1145,16 +1236,20 @@ class _LiveQuizCard extends StatelessWidget {
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: AppColors.surface,
+                            color: Colors.white.withValues(
+                              alpha: isDisabledPreview ? 0.88 : 0.16,
+                            ),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.surfaceBorder),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.26),
+                            ),
                           ),
                           child: Text(
                             startsLabel,
                             style: AppTextStyles.h3.copyWith(
                               color: isDisabledPreview
                                   ? AppColors.textSecondary
-                                  : AppColors.primaryDark,
+                                  : Colors.white,
                               fontSize: 13.5,
                             ),
                           ),
@@ -1165,30 +1260,37 @@ class _LiveQuizCard extends StatelessWidget {
                     Row(
                       children: [
                         Container(
-                          width: 52,
-                          height: 52,
+                          width: 56,
+                          height: 56,
                           decoration: BoxDecoration(
                             color: isDisabledPreview
-                                ? AppColors.surfaceElevated.withValues(
-                                    alpha: 0.72,
-                                  )
-                                : AppColors.accent,
-                            borderRadius: BorderRadius.circular(18),
+                                ? AppColors.surfaceElevated
+                                : Colors.white.withValues(alpha: 0.96),
+                            borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                               color: isDisabledPreview
                                   ? AppColors.textHint.withValues(alpha: 0.18)
-                                  : AppColors.primary.withValues(alpha: 0.18),
+                                  : Colors.white.withValues(alpha: 0.62),
+                              width: 1.4,
                             ),
+                            boxShadow: [
+                              if (!isDisabledPreview)
+                                BoxShadow(
+                                  color: arenaColor.withValues(alpha: 0.34),
+                                  blurRadius: 18,
+                                  offset: const Offset(0, 8),
+                                ),
+                            ],
                           ),
                           child: Icon(
-                            Icons.sports_esports_rounded,
+                            Icons.bolt_rounded,
                             color: isDisabledPreview
                                 ? AppColors.textHint
                                 : AppColors.primaryDark,
-                            size: 27,
+                            size: 30,
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 11),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1200,12 +1302,12 @@ class _LiveQuizCard extends StatelessWidget {
                                 style: AppTextStyles.h2.copyWith(
                                   color: isDisabledPreview
                                       ? AppColors.textSecondary
-                                      : AppColors.textPrimary,
-                                  fontSize: 17,
-                                  height: 1.15,
+                                      : Colors.white,
+                                  fontSize: 18,
+                                  height: 1.12,
                                 ),
                               ),
-                              const SizedBox(height: 6),
+                              const SizedBox(height: 7),
                               Row(
                                 children: [
                                   Flexible(
@@ -1213,14 +1315,15 @@ class _LiveQuizCard extends StatelessWidget {
                                       icon: Icons.workspace_premium_rounded,
                                       label: _formatPrize(contest.prizeValue),
                                       muted: isDisabledPreview,
+                                      inverted: !isDisabledPreview,
                                     ),
                                   ),
                                   const SizedBox(width: 6),
                                   _LiveQuizMetaChip(
                                     icon: Icons.groups_rounded,
-                                    label:
-                                        '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}',
+                                    label: '${contest.registeredCount} joueurs',
                                     muted: isDisabledPreview,
+                                    inverted: !isDisabledPreview,
                                   ),
                                 ],
                               ),
@@ -1229,36 +1332,44 @@ class _LiveQuizCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const Spacer(),
+                    const SizedBox(height: 12),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 9,
+                        horizontal: 12,
+                        vertical: 11,
                       ),
                       decoration: BoxDecoration(
                         color: isDisabledPreview
-                            ? AppColors.surfaceElevated.withValues(alpha: 0.70)
-                            : AppColors.accent.withValues(alpha: 0.72),
-                        borderRadius: BorderRadius.circular(17),
+                            ? Colors.white.withValues(alpha: 0.72)
+                            : Colors.black.withValues(alpha: 0.17),
+                        borderRadius: BorderRadius.circular(19),
                         border: Border.all(
                           color: isDisabledPreview
                               ? AppColors.surfaceBorder
-                              : AppColors.primary.withValues(alpha: 0.16),
+                              : Colors.white.withValues(alpha: 0.18),
                         ),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            isDisabledPreview
-                                ? Icons.history_toggle_off_rounded
-                                : Icons.timer_rounded,
-                            color: isDisabledPreview
-                                ? AppColors.textHint
-                                : AppColors.gold,
-                            size: 17,
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: arenaColor.withValues(
+                                alpha: isDisabledPreview ? 0.12 : 0.22,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isDisabledPreview
+                                  ? Icons.history_toggle_off_rounded
+                                  : Icons.timer_rounded,
+                              color: arenaColor,
+                              size: 18,
+                            ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 9),
                           Expanded(
                             child: isEnded
                                 ? Text(
@@ -1277,22 +1388,20 @@ class _LiveQuizCard extends StatelessWidget {
                                       liveStartsAt == null
                                           ? Text(
                                               'Départ bientôt',
-                                              style: AppTextStyles.bodySmall,
+                                              style: AppTextStyles.bodySmall
+                                                  .copyWith(
+                                                    color: isDisabledPreview
+                                                        ? AppColors
+                                                              .textSecondary
+                                                        : Colors.white,
+                                                    fontWeight: FontWeight.w900,
+                                                  ),
                                             )
                                           : _LiveQuizStartsCountdown(
                                               startsAt: liveStartsAt,
+                                              inverted: !isDisabledPreview,
+                                              emphasis: !isDisabledPreview,
                                             ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: AppTextStyles.bodySmall.copyWith(
-                                          color: AppColors.textSecondary,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
                                     ],
                                   ),
                           ),
@@ -1300,24 +1409,20 @@ class _LiveQuizCard extends StatelessWidget {
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 5,
+                                horizontal: 10,
+                                vertical: 7,
                               ),
                               decoration: BoxDecoration(
-                                color: AppColors.surfaceElevated,
+                                color: isDisabledPreview
+                                    ? AppColors.surfaceElevated
+                                    : Colors.white,
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: AppColors.primary.withValues(
-                                    alpha: 0.16,
-                                  ),
+                                  color: arenaColor.withValues(alpha: 0.28),
                                 ),
                               ),
                               child: Text(
-                                isDisabledPreview
-                                    ? 'Voir détails'
-                                    : isRegistered
-                                    ? 'Entrer'
-                                    : 'Réserver',
+                                ctaText,
                                 style: AppTextStyles.bodySmall.copyWith(
                                   color: isDisabledPreview
                                       ? AppColors.textSecondary
@@ -1345,23 +1450,35 @@ class _LiveQuizMetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool muted;
+  final bool inverted;
 
   const _LiveQuizMetaChip({
     required this.icon,
     required this.label,
     required this.muted,
+    this.inverted = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = muted ? AppColors.textHint : AppColors.textSecondary;
+    final color = muted
+        ? AppColors.textHint
+        : inverted
+        ? Colors.white.withValues(alpha: 0.88)
+        : AppColors.textSecondary;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: muted ? 0.58 : 0.72),
+        color: inverted
+            ? Colors.white.withValues(alpha: 0.12)
+            : AppColors.surface.withValues(alpha: muted ? 0.58 : 0.72),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.surfaceBorder),
+        border: Border.all(
+          color: inverted
+              ? Colors.white.withValues(alpha: 0.22)
+              : AppColors.surfaceBorder,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1512,203 +1629,213 @@ class _CompactContestCard extends ConsumerWidget {
         ? (participantsCount / contest.maxParticipants).clamp(0.0, 1.0)
         : timeProgress;
     final progressLabel = hasLimit
-        ? '$participantsCount / ${contest.maxParticipants} joueurs'
+        ? '$participantsCount/${contest.maxParticipants}'
         : '${(timeProgress * 100).round()}%';
 
-    return AppCard(
+    return InkWell(
       onTap: () => context.push('/contests/${contest.id}'),
-      padding: const EdgeInsets.all(13),
-      borderRadius: 18,
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: contest.type.color.withValues(alpha: 0.22),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: contest.type.color.withValues(alpha: 0.22),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primaryDark.withValues(alpha: 0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: contest.type.color.withValues(alpha: 0.24),
+                    ),
+                  ),
+                  child: contest.brandLogoUrl?.isNotEmpty == true
+                      ? _BrandLogo(url: contest.brandLogoUrl!, size: 42)
+                      : Icon(
+                          contest.type.icon,
+                          color: contest.type.color,
+                          size: 20,
+                        ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children:
+                            _contestGamingBadges(
+                                  contest,
+                                  hasParticipated: hasParticipated,
+                                )
+                                .map(
+                                  (badge) => _GamingBadge(badge, compact: true),
+                                )
+                                .toList(),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        contest.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.h2.copyWith(fontSize: 14.8),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatPrize(contest.prizeValue),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.price.copyWith(fontSize: 13.5),
+                      ),
+                    ],
                   ),
                 ),
-                child: contest.brandLogoUrl?.isNotEmpty == true
-                    ? _BrandLogo(url: contest.brandLogoUrl!, size: 42)
-                    : Icon(
-                        contest.type.icon,
-                        color: contest.type.color,
-                        size: 20,
-                      ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      contest.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.h2.copyWith(fontSize: 14.8),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatPrize(contest.prizeValue),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.price.copyWith(fontSize: 13.5),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${contest.viewsCount} vues',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    _CategoryBadge(label: _contestCategoryLabel(contest)),
+                    const SizedBox(height: 8),
+                    ContestTimer(
+                      endsAt: contest.computedLiveEndsAt,
                       style: AppTextStyles.bodySmall.copyWith(
-                        fontSize: 10.5,
-                        color: AppColors.textHint,
-                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (hasParticipated)
-                    const _ParticipatedBadge(compact: true)
-                  else
-                    _CategoryBadge(label: _contestCategoryLabel(contest)),
-                  const SizedBox(height: 8),
-                  ContestTimer(endsAt: contest.computedLiveEndsAt),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          Row(
-            children: [
-              Expanded(
-                child: _ScheduleLine(
-                  icon: Icons.event_available_rounded,
-                  text: 'Fin ${_shortDateTime(contest.computedLiveEndsAt)}',
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _ScheduleLine(
-                  icon: Icons.emoji_events_rounded,
-                  text: '${_winnerText(contest)} après',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 9),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  hasLimit ? 'Places prises' : 'Temps écoulé',
-                  style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textHint,
-                    fontWeight: FontWeight.w700,
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    hasLimit ? 'Places' : 'Temps',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textHint,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              Text(
-                progressLabel,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w800,
+                Text(
+                  progressLabel,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 3,
-              backgroundColor: AppColors.separator,
-              valueColor: AlwaysStoppedAnimation<Color>(contest.type.color),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 5),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 3,
+                backgroundColor: AppColors.separator,
+                valueColor: AlwaysStoppedAnimation<Color>(contest.type.color),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SponsoredBadge extends StatelessWidget {
-  const _SponsoredBadge();
+class _GamingBadgeData {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _GamingBadgeData({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+}
+
+class _GamingBadge extends StatelessWidget {
+  final _GamingBadgeData data;
+  final bool compact;
+
+  const _GamingBadge(this.data, {this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 3 : 4,
+      ),
       decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.14),
+        color: data.color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: AppColors.primary.withValues(alpha: 0.28),
-          width: 0.8,
+          color: data.color.withValues(alpha: 0.24),
+          width: 0.9,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: data.color.withValues(alpha: 0.04),
+            blurRadius: compact ? 5 : 7,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.bolt_rounded, color: AppColors.primary, size: 12),
-          const SizedBox(width: 4),
+          Icon(data.icon, color: data.color, size: compact ? 10 : 12),
+          SizedBox(width: compact ? 3 : 4),
           Text(
-            'Sponsorisé',
+            data.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: AppTextStyles.bodySmall.copyWith(
-              fontSize: 10.5,
-              color: AppColors.primaryLight,
-              fontWeight: FontWeight.w800,
+              color: data.color,
+              fontSize: compact ? 9.3 : 10.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ScheduleLine extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _ScheduleLine({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: AppColors.textHint, size: 13),
-        const SizedBox(width: 4),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.bodySmall.copyWith(
-              color: AppColors.textHint,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
 
 class _LiveQuizStartsCountdown extends StatefulWidget {
   final DateTime startsAt;
+  final bool inverted;
+  final bool emphasis;
 
-  const _LiveQuizStartsCountdown({required this.startsAt});
+  const _LiveQuizStartsCountdown({
+    required this.startsAt,
+    this.inverted = false,
+    this.emphasis = false,
+  });
 
   @override
   State<_LiveQuizStartsCountdown> createState() =>
@@ -1755,7 +1882,7 @@ class _LiveQuizStartsCountdownState extends State<_LiveQuizStartsCountdown> {
     final minutes = _remaining.inMinutes.remainder(60);
     final seconds = _remaining.inSeconds.remainder(60);
 
-    return 'Commence dans $totalHours:'
+    return 'Débute dans $totalHours:'
         '${minutes.toString().padLeft(2, '0')}:'
         '${seconds.toString().padLeft(2, '0')}';
   }
@@ -1764,15 +1891,21 @@ class _LiveQuizStartsCountdownState extends State<_LiveQuizStartsCountdown> {
   Widget build(BuildContext context) {
     final isUrgent =
         _remaining > Duration.zero && _remaining < const Duration(minutes: 5);
+    final color = widget.inverted
+        ? (isUrgent ? AppColors.accentRed : Colors.white)
+        : (isUrgent ? AppColors.accentRed : AppColors.textPrimary);
 
     return Text(
       _formatRemaining(),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: AppTextStyles.bodySmall.copyWith(
-        color: isUrgent ? AppColors.accentRed : AppColors.textPrimary,
-        fontWeight: FontWeight.w900,
-      ),
+      style: (widget.emphasis ? AppTextStyles.h2 : AppTextStyles.bodySmall)
+          .copyWith(
+            color: color,
+            fontWeight: FontWeight.w900,
+            fontSize: widget.emphasis ? 15 : null,
+            height: widget.emphasis ? 1.05 : null,
+          ),
     );
   }
 }
@@ -1942,13 +2075,6 @@ String _formatPrize(num value) {
   return formatCurrencyAmount(value);
 }
 
-String _shortDateTime(DateTime date) {
-  return 'le ${date.day.toString().padLeft(2, '0')}/'
-      '${date.month.toString().padLeft(2, '0')} à '
-      '${date.hour.toString().padLeft(2, '0')}:'
-      '${date.minute.toString().padLeft(2, '0')}';
-}
-
 String _winnerText(Contest contest) {
   if (AppStoreReviewMode.enabled) {
     return contest.winnersCount > 1
@@ -1967,6 +2093,20 @@ String _homeGreeting() {
   return 'Bonsoir';
 }
 
+int _playerLevelFromPoints(int points) {
+  return math.max(1, (points ~/ 100) + 1);
+}
+
+double _playerLevelProgress(int points) {
+  return (points % 100) / 100;
+}
+
+String _compactPoints(int points) {
+  if (points >= 1000000) return '${(points / 1000000).toStringAsFixed(1)}M';
+  if (points >= 1000) return '${(points / 1000).toStringAsFixed(1)}K';
+  return '$points';
+}
+
 class _HomeHeader extends StatelessWidget {
   final UserProfile user;
 
@@ -1974,59 +2114,140 @@ class _HomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final level = _playerLevelFromPoints(user.pointsTotal);
+    final progress = _playerLevelProgress(user.pointsTotal);
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => context.go('/profile'),
+          child: _UserAvatar(avatarUrl: user.avatarUrl, size: 42, glow: true),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                _homeGreeting(),
-                style: AppTextStyles.bodySecondary.copyWith(
-                  color: _homeOnBackgroundColor.withValues(alpha: 0.82),
-                  fontSize: 12.5,
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      user.username,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.h1.copyWith(
+                        color: _homeOnBackgroundColor,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.13),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Text(
+                      'LVL $level',
+                      style: AppTextStyles.label.copyWith(
+                        color: Colors.white,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 1),
-              Text(
-                user.username,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.h1.copyWith(
-                  color: _homeOnBackgroundColor,
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
-                ),
+              const SizedBox(height: 5),
+              Row(
+                children: [
+                  Text(
+                    _homeGreeting(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: _homeOnBackgroundColor.withValues(alpha: 0.7),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: Stack(
+                        children: [
+                          Container(
+                            height: 4,
+                            color: Colors.white.withValues(alpha: 0.13),
+                          ),
+                          FractionallySizedBox(
+                            widthFactor: progress.clamp(0.06, 1),
+                            child: Container(
+                              height: 4,
+                              decoration: const BoxDecoration(
+                                color: AppColors.accentGreen,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.surfaceBorder),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.star_border_rounded,
-                color: AppColors.gold,
-                size: 18,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                '${user.pointsTotal}',
-                style: AppTextStyles.h3.copyWith(fontSize: 15),
-              ),
-            ],
+        const SizedBox(width: 9),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => context.go('/leaderboard'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.36)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primaryDark.withValues(alpha: 0.14),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.stars_rounded,
+                  color: AppColors.primary,
+                  size: 16,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _compactPoints(user.pointsTotal),
+                  style: AppTextStyles.h3.copyWith(
+                    color: AppColors.primaryDark,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(width: 10),
-        _UserAvatar(avatarUrl: user.avatarUrl),
       ],
     );
   }
@@ -2034,22 +2255,39 @@ class _HomeHeader extends StatelessWidget {
 
 class _UserAvatar extends StatelessWidget {
   final String? avatarUrl;
+  final double size;
+  final bool glow;
 
-  const _UserAvatar({required this.avatarUrl});
+  const _UserAvatar({
+    required this.avatarUrl,
+    this.size = 39,
+    this.glow = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final avatar = avatarForId(avatarUrl);
 
     return Container(
-      width: 39,
-      height: 39,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: avatar.color.withValues(alpha: 0.18),
-        border: Border.all(color: AppColors.surfaceBorder),
+        color: glow
+            ? Colors.white.withValues(alpha: 0.16)
+            : avatar.color.withValues(alpha: 0.18),
+        border: Border.all(
+          color: glow
+              ? Colors.white.withValues(alpha: 0.42)
+              : AppColors.surfaceBorder,
+          width: glow ? 1.6 : 1,
+        ),
       ),
-      child: Icon(avatar.icon, color: avatar.color, size: 20),
+      child: Icon(
+        avatar.icon,
+        color: glow ? Colors.white : avatar.color,
+        size: size * 0.5,
+      ),
     );
   }
 }
@@ -2065,21 +2303,21 @@ class _HomeHeaderShimmer extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          const _ShimmerCircle(size: 42),
+          const SizedBox(width: 10),
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _ShimmerBlock(width: 78, height: 13),
+                _ShimmerBlock(width: 152, height: 21),
                 SizedBox(height: 7),
-                _ShimmerBlock(width: 150, height: 24),
+                _ShimmerBlock(width: 176, height: 4),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          const _ShimmerBlock(width: 70, height: 38),
-          const SizedBox(width: 10),
-          const _ShimmerCircle(size: 39),
+          const _ShimmerBlock(width: 64, height: 34),
         ],
       ),
     );
@@ -2094,36 +2332,9 @@ class _HomeHeaderFallback extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _homeGreeting(),
-                style: AppTextStyles.bodySecondary.copyWith(
-                  color: _homeOnBackgroundColor.withValues(alpha: 0.82),
-                  fontSize: 12.5,
-                ),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                'MegaPromo',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.h1.copyWith(
-                  color: _homeOnBackgroundColor,
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 10),
         Container(
-          width: 39,
-          height: 39,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.white.withValues(alpha: 0.16),
@@ -2133,6 +2344,34 @@ class _HomeHeaderFallback extends StatelessWidget {
             Icons.person_rounded,
             color: Colors.white,
             size: 20,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'MegaPromo',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.h1.copyWith(
+                  color: _homeOnBackgroundColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                _homeGreeting(),
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: _homeOnBackgroundColor.withValues(alpha: 0.7),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ),
       ],

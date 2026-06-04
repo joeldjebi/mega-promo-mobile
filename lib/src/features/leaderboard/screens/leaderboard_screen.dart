@@ -65,10 +65,12 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
               (user) => user.id == currentUserId,
             );
             final podiumUsers = users.take(3).toList();
-            final otherUsers = users.skip(3).take(5).toList();
-            final currentUser = data.currentUser ??
+            final otherUsers = users.skip(3).take(10).toList();
+            final currentUser =
+                data.currentUser ??
                 (currentUserIndex >= 0 ? users[currentUserIndex] : null);
-            final currentUserRank = data.currentUserRank ??
+            final currentUserRank =
+                data.currentUserRank ??
                 currentUser?.rank ??
                 (currentUserIndex >= 0 ? currentUserIndex + 1 : null);
             final currentUserIsOnPodium = podiumUsers.any(
@@ -84,13 +86,13 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
                 !currentUserIsInOtherUsers;
             final otherRows = <({int rank, LeaderboardUser user})>[
               ...otherUsers.asMap().entries.map(
-                    (entry) => (
-                      rank: entry.value.rank ?? entry.key + 4,
-                      user: entry.value,
-                    ),
-                  ),
+                (entry) => (
+                  rank: entry.value.rank ?? entry.key + 4,
+                  user: entry.value,
+                ),
+              ),
               if (shouldAppendCurrentUser)
-                (rank: currentUserRank!, user: currentUser!),
+                (rank: currentUserRank, user: currentUser),
             ];
 
             return ListView(
@@ -107,13 +109,10 @@ class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
                   const _ContestScopeBanner(),
                 ],
                 const SizedBox(height: 20),
-                _Podium(
-                  users: podiumUsers,
-                  currentUserId: currentUserId,
-                ),
+                _Podium(users: podiumUsers, currentUserId: currentUserId),
                 if (otherRows.isNotEmpty) ...[
                   const SizedBox(height: 22),
-                  Text('AUTRES JOUEURS', style: AppTextStyles.label),
+                  Text('CLASSEMENT', style: AppTextStyles.label),
                   const SizedBox(height: 12),
                   ...otherRows.map((row) {
                     return Padding(
@@ -194,11 +193,7 @@ class _Header extends StatelessWidget {
             borderRadius: BorderRadius.circular(15),
             border: Border.all(color: iconBorder),
           ),
-          child: Icon(
-            Icons.leaderboard_rounded,
-            color: iconColor,
-            size: 22,
-          ),
+          child: Icon(Icons.leaderboard_rounded, color: iconColor, size: 22),
         ),
       ],
     );
@@ -348,66 +343,121 @@ class _Podium extends StatelessWidget {
     final second = users.length > 1 ? users[1] : null;
     final third = users.length > 2 ? users[2] : null;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0EDFF),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.16)),
-        boxShadow: const [
-          BoxShadow(
-            color: AppColors.subtleShadow,
-            blurRadius: 14,
-            offset: Offset(0, 5),
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 18 * (1 - value)),
+            child: child,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('TOP 3', style: AppTextStyles.label),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 224,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: _PodiumPlace(
-                    rank: 2,
-                    user: second,
-                    height: 64,
-                    avatarSize: 52,
-                    color: const Color(0xFF9CA3B8),
-                    isCurrentUser: second?.id == currentUserId,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _PodiumPlace(
-                    rank: 1,
-                    user: first,
-                    height: 82,
-                    avatarSize: 60,
-                    color: AppColors.gold,
-                    isCurrentUser: first?.id == currentUserId,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _PodiumPlace(
-                    rank: 3,
-                    user: third,
-                    height: 56,
-                    avatarSize: 50,
-                    color: const Color(0xFFB98252),
-                    isCurrentUser: third?.id == currentUserId,
-                  ),
-                ),
-              ],
+        );
+      },
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF6557D9),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primaryDark.withValues(alpha: 0.18),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
             ),
-          ),
-        ],
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 296,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final sideWidth = (width * 0.29).clamp(82.0, 108.0);
+                  final centerWidth = (width * 0.33).clamp(96.0, 126.0);
+                  final sideInset = (width * 0.06).clamp(14.0, 24.0);
+
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        child: CustomPaint(painter: _PodiumArenaLinesPainter()),
+                      ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.workspace_premium_rounded,
+                              color: Colors.white,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'TOP 3',
+                              style: AppTextStyles.label.copyWith(
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        left: sideInset,
+                        bottom: 0,
+                        width: sideWidth,
+                        child: _PodiumPlace(
+                          rank: 2,
+                          user: second,
+                          height: 92,
+                          avatarSize: 54,
+                          color: const Color(0xFF8FD3FF),
+                          isCurrentUser: second?.id == currentUserId,
+                          animationDelay: 120,
+                        ),
+                      ),
+                      Positioned(
+                        right: sideInset,
+                        bottom: 0,
+                        width: sideWidth,
+                        child: _PodiumPlace(
+                          rank: 3,
+                          user: third,
+                          height: 76,
+                          avatarSize: 52,
+                          color: const Color(0xFFFFB17A),
+                          isCurrentUser: third?.id == currentUserId,
+                          animationDelay: 190,
+                        ),
+                      ),
+                      Positioned(
+                        left: (width - centerWidth) / 2,
+                        bottom: 0,
+                        width: centerWidth,
+                        child: _PodiumPlace(
+                          rank: 1,
+                          user: first,
+                          height: 138,
+                          avatarSize: 68,
+                          color: const Color(0xFFD7C7FF),
+                          isCurrentUser: first?.id == currentUserId,
+                          animationDelay: 40,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -420,6 +470,7 @@ class _PodiumPlace extends StatelessWidget {
   final double avatarSize;
   final Color color;
   final bool isCurrentUser;
+  final int animationDelay;
 
   const _PodiumPlace({
     required this.rank,
@@ -428,6 +479,7 @@ class _PodiumPlace extends StatelessWidget {
     required this.avatarSize,
     required this.color,
     required this.isCurrentUser,
+    required this.animationDelay,
   });
 
   @override
@@ -435,69 +487,239 @@ class _PodiumPlace extends StatelessWidget {
     final avatar = avatarForId(user?.avatarUrl);
     final username = user?.username ?? 'En attente';
     final points = user?.points ?? 0;
+    final avatarBackground = rank == 1
+        ? const Color(0xFFBDF4F0)
+        : rank == 2
+        ? const Color(0xFFD7F0FF)
+        : const Color(0xFFFFE0C7);
+    final avatarForeground = rank == 1
+        ? const Color(0xFF7C4A16)
+        : rank == 2
+        ? const Color(0xFF285C7A)
+        : const Color(0xFF8D4D21);
 
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Container(
-          width: avatarSize,
-          height: avatarSize,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: isCurrentUser ? AppColors.primary : color,
-              width: isCurrentUser ? 2.2 : 1.4,
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 420 + animationDelay),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        final settled = value.clamp(0.0, 1.0);
+        return Opacity(
+          opacity: settled,
+          child: Transform.translate(
+            offset: Offset(0, 22 * (1 - settled)),
+            child: Transform.scale(
+              scale: 0.94 + (settled * 0.06),
+              child: child,
             ),
           ),
-          child: Icon(
-            avatar.icon,
-            color: avatar.color,
-            size: avatarSize * 0.45,
-          ),
-        ),
-        const SizedBox(height: 7),
-        Text(
-          username,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: AppTextStyles.h3.copyWith(
-            color: isCurrentUser
-                ? AppColors.primaryDark
-                : AppColors.textPrimary,
-            fontSize: rank == 1 ? 15 : 13,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '$points pts',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.bodySmall.copyWith(
-            color: rank == 1 ? AppColors.gold : AppColors.textSecondary,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 7),
-        Container(
-          height: height,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.14),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            border: Border.all(color: color.withValues(alpha: 0.28)),
-          ),
-          child: Center(
-            child: Text(
-              '$rank',
-              style: AppTextStyles.h2.copyWith(color: color),
+        );
+      },
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Container(
+            width: avatarSize,
+            height: avatarSize,
+            decoration: BoxDecoration(
+              color: avatarBackground,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isCurrentUser
+                    ? AppColors.accentGreen
+                    : Colors.white.withValues(alpha: 0.84),
+                width: isCurrentUser ? 2.4 : 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: rank == 1 ? 0.26 : 0.16),
+                  blurRadius: rank == 1 ? 18 : 12,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(
+              avatar.icon,
+              color: avatarForeground,
+              size: avatarSize * 0.45,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 7),
+          Text(
+            username,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.h3.copyWith(
+              color: Colors.white,
+              fontSize: rank == 1 ? 15 : 13,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            _formatLeaderboardPoints(points),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: color.withValues(alpha: 0.96),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _PodiumBlock3D(rank: rank, height: height, color: color),
+        ],
+      ),
     );
   }
+}
+
+class _PodiumBlock3D extends StatelessWidget {
+  final int rank;
+  final double height;
+  final Color color;
+
+  const _PodiumBlock3D({
+    required this.rank,
+    required this.height,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final depth = 18.0;
+    final horizontalInset = rank == 1 ? 4.0 : 6.0;
+
+    return SizedBox(
+      height: height + depth,
+      width: double.infinity,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          return Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              SizedBox(
+                width: width - (horizontalInset * 2),
+                height: height + depth,
+                child: CustomPaint(
+                  size: Size(width - (horizontalInset * 2), height + depth),
+                  painter: _PodiumBlockPainter(color: color, depth: depth),
+                ),
+              ),
+              Positioned(
+                left: horizontalInset,
+                top: depth,
+                width: width - (horizontalInset * 2),
+                height: height,
+                child: Center(
+                  child: Text(
+                    '$rank',
+                    style: AppTextStyles.h2.copyWith(
+                      color: rank == 1 ? const Color(0xFF3A2A00) : Colors.white,
+                      fontSize: rank == 1 ? 54 : 42,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PodiumBlockPainter extends CustomPainter {
+  final Color color;
+  final double depth;
+
+  const _PodiumBlockPainter({required this.color, required this.depth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final frontPaint = Paint()..color = color.withValues(alpha: 0.94);
+    final topPaint = Paint()..color = Colors.white.withValues(alpha: 0.26);
+    final innerTopPaint = Paint()..color = color.withValues(alpha: 0.62);
+    final strokePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    final front = RRect.fromRectAndCorners(
+      Rect.fromLTWH(0, depth, size.width, size.height - depth),
+      topLeft: const Radius.circular(3),
+      topRight: const Radius.circular(3),
+      bottomLeft: const Radius.circular(2),
+      bottomRight: const Radius.circular(2),
+    );
+
+    final top = Path()
+      ..moveTo(16, depth)
+      ..lineTo(32, 0)
+      ..lineTo(size.width - 32, 0)
+      ..lineTo(size.width - 16, depth)
+      ..close();
+
+    canvas.drawShadow(
+      Path()..addRRect(front),
+      Colors.black.withValues(alpha: 0.22),
+      8,
+      false,
+    );
+    canvas.drawRRect(front, frontPaint);
+    canvas.drawPath(top, topPaint);
+    canvas.drawPath(
+      Path()
+        ..moveTo(23, depth - 1)
+        ..lineTo(35, 5)
+        ..lineTo(size.width - 35, 5)
+        ..lineTo(size.width - 23, depth - 1)
+        ..close(),
+      innerTopPaint,
+    );
+    canvas.drawPath(top, strokePaint);
+    canvas.drawRRect(front, strokePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PodiumBlockPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.depth != depth;
+  }
+}
+
+class _PodiumArenaLinesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    final path1 = Path()
+      ..moveTo(-20, size.height * 0.62)
+      ..quadraticBezierTo(
+        size.width * 0.34,
+        size.height * 0.12,
+        size.width + 26,
+        size.height * 0.3,
+      );
+    final path2 = Path()
+      ..moveTo(size.width * 0.08, size.height * 0.08)
+      ..quadraticBezierTo(
+        size.width * 0.48,
+        -18,
+        size.width * 0.94,
+        size.height * 0.42,
+      );
+
+    canvas.drawPath(path1, paint);
+    canvas.drawPath(path2, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PodiumArenaLinesPainter oldDelegate) => false;
 }
 
 class _RankCard extends StatelessWidget {
@@ -515,73 +737,166 @@ class _RankCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final avatar = avatarForId(user.avatarUrl);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      decoration: BoxDecoration(
-        color: isCurrentUser
-            ? AppColors.primary.withValues(alpha: 0.12)
-            : AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 260 + (rank.clamp(4, 12) * 18)),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(18 * (1 - value), 0),
+            child: child,
+          ),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.fromLTRB(8, 9, 12, 9),
+        decoration: BoxDecoration(
           color: isCurrentUser
-              ? AppColors.primary.withValues(alpha: 0.48)
-              : AppColors.surfaceBorder,
-          width: isCurrentUser ? 1.2 : 0.8,
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isCurrentUser
+                ? AppColors.primary.withValues(alpha: 0.52)
+                : AppColors.surfaceBorder,
+            width: isCurrentUser ? 1.3 : 0.8,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isCurrentUser
+                  ? AppColors.primary.withValues(alpha: 0.12)
+                  : Colors.black.withValues(alpha: 0.04),
+              blurRadius: isCurrentUser ? 18 : 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        boxShadow: const [
-          BoxShadow(
-            color: AppColors.subtleShadow,
-            blurRadius: 14,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 24,
-            child: Text(
-              '$rank',
-              style: AppTextStyles.bodySecondary.copyWith(
-                color: isCurrentUser ? AppColors.primary : AppColors.textHint,
-                fontWeight: FontWeight.w900,
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 3,
+              height: 42,
+              decoration: BoxDecoration(
+                color: isCurrentUser ? AppColors.primary : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: avatar.color.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
-              border: Border.all(color: avatar.color.withValues(alpha: 0.20)),
-            ),
-            child: Icon(avatar.icon, color: avatar.color, size: 19),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Text(
-              user.username,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySecondary.copyWith(
+            const SizedBox(width: 8),
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
                 color: isCurrentUser
-                    ? AppColors.primaryDark
-                    : AppColors.textPrimary,
-                fontWeight: FontWeight.w800,
+                    ? AppColors.primary.withValues(alpha: 0.12)
+                    : AppColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isCurrentUser
+                      ? AppColors.primary.withValues(alpha: 0.26)
+                      : AppColors.surfaceBorder,
+                ),
+              ),
+              child: Text(
+                '$rank',
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: isCurrentUser ? AppColors.primary : AppColors.textHint,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '${user.points} pts',
-            style: AppTextStyles.bodySmall.copyWith(
-              color: isCurrentUser ? AppColors.primaryDark : AppColors.textHint,
-              fontWeight: FontWeight.w800,
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: avatar.color.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+                border: Border.all(color: avatar.color.withValues(alpha: 0.2)),
+              ),
+              child: Icon(avatar.icon, color: avatar.color, size: 19),
             ),
-          ),
-        ],
+            const SizedBox(width: 11),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      user.username,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySecondary.copyWith(
+                        color: isCurrentUser
+                            ? AppColors.primaryDark
+                            : AppColors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  if (isCurrentUser) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'MOI',
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.primary,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _ScorePill(points: user.points, highlighted: isCurrentUser),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScorePill extends StatelessWidget {
+  final int points;
+  final bool highlighted;
+
+  const _ScorePill({required this.points, required this.highlighted});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? AppColors.primary.withValues(alpha: 0.12)
+            : AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: highlighted
+              ? AppColors.primary.withValues(alpha: 0.22)
+              : AppColors.surfaceBorder,
+        ),
+      ),
+      child: Text(
+        _formatLeaderboardPoints(points),
+        style: AppTextStyles.bodySmall.copyWith(
+          color: highlighted ? AppColors.primaryDark : AppColors.textSecondary,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -690,4 +1005,10 @@ class _LeaderboardErrorState extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatLeaderboardPoints(int points) {
+  if (points >= 1000000) return '${(points / 1000000).toStringAsFixed(1)}M pts';
+  if (points >= 1000) return '${(points / 1000).toStringAsFixed(1)}K pts';
+  return '$points pts';
 }

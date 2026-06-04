@@ -13,12 +13,19 @@ import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../../services/fcm_service.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
 import '../providers/player_payment_methods_provider.dart';
 import '../providers/profile_provider.dart';
+
+final pushNotificationsEnabledProvider = FutureProvider.autoDispose<bool>((
+  ref,
+) {
+  return FcmService.arePushNotificationsEnabled();
+});
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -882,6 +889,7 @@ class _ProfileActionPanel extends StatelessWidget {
         icon: Icons.notifications_none_rounded,
         title: 'Notifications',
         subtitle: 'Alertes et récompenses',
+        isNotificationToggle: true,
         onTap: () => context.push('/notifications'),
       ),
       _ProfileAction(
@@ -973,12 +981,14 @@ class _ProfileAction {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final bool isNotificationToggle;
 
   const _ProfileAction({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.isNotificationToggle = false,
   });
 }
 
@@ -1032,22 +1042,123 @@ class _ProfileActionTile extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (action.isNotificationToggle)
+                    _NotificationToggle(isCompact: isCompact),
                 ],
               ),
               SizedBox(height: isCompact ? 5 : 7),
-              Text(
-                action.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textHint,
-                  fontSize: isCompact ? 9.5 : 10,
-                  height: 1.05,
-                ),
-              ),
+              action.isNotificationToggle
+                  ? _NotificationStatusText(isCompact: isCompact)
+                  : Text(
+                      action.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textHint,
+                        fontSize: isCompact ? 9.5 : 10,
+                        height: 1.05,
+                      ),
+                    ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _NotificationToggle extends ConsumerStatefulWidget {
+  final bool isCompact;
+
+  const _NotificationToggle({required this.isCompact});
+
+  @override
+  ConsumerState<_NotificationToggle> createState() =>
+      _NotificationToggleState();
+}
+
+class _NotificationToggleState extends ConsumerState<_NotificationToggle> {
+  bool _isSaving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = ref
+        .watch(pushNotificationsEnabledProvider)
+        .maybeWhen(data: (value) => value, orElse: () => false);
+
+    return Transform.scale(
+      scale: widget.isCompact ? 0.72 : 0.78,
+      child: Switch.adaptive(
+        value: enabled,
+        activeThumbColor: AppColors.primary,
+        activeTrackColor: AppColors.primary.withValues(alpha: 0.28),
+        onChanged: _isSaving
+            ? null
+            : (value) async {
+                setState(() => _isSaving = true);
+                try {
+                  final isEnabled =
+                      await FcmService.setPushNotificationsEnabled(value);
+                  ref.invalidate(pushNotificationsEnabledProvider);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        isEnabled
+                            ? 'Notifications activées.'
+                            : 'Notifications désactivées.',
+                      ),
+                    ),
+                  );
+                } catch (error, stackTrace) {
+                  await AppTelemetryService.recordError(
+                    error,
+                    stackTrace,
+                    reason: 'profile_push_toggle_failed',
+                  );
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Impossible de modifier les notifications.',
+                      ),
+                    ),
+                  );
+                } finally {
+                  if (mounted) setState(() => _isSaving = false);
+                }
+              },
+      ),
+    );
+  }
+}
+
+class _NotificationStatusText extends ConsumerWidget {
+  final bool isCompact;
+
+  const _NotificationStatusText({required this.isCompact});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(pushNotificationsEnabledProvider);
+    final text = status.when(
+      data: (enabled) => enabled ? 'Activées' : 'Désactivées',
+      loading: () => 'Vérification...',
+      error: (error, stackTrace) => 'État indisponible',
+    );
+
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: AppTextStyles.bodySmall.copyWith(
+        color: status.maybeWhen(
+          data: (enabled) =>
+              enabled ? AppColors.accentGreen : AppColors.textHint,
+          orElse: () => AppColors.textHint,
+        ),
+        fontSize: isCompact ? 9.5 : 10,
+        height: 1.05,
       ),
     );
   }

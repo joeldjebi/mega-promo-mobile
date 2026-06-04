@@ -169,7 +169,6 @@ HomeBootstrapData _payloadToHomeBootstrapData(Map<String, dynamic> payload) {
         return contest.status == 'active';
       })
       .where(_isVisibleForAppStoreReview)
-      .where((contest) => contest.isAccessibleForPlan(profile.planKey))
       .toList();
 
   return HomeBootstrapData(
@@ -245,10 +244,9 @@ Future<HomeBootstrapData> _fetchHomeBootstrapFallback(
 
   var contests = const <Contest>[];
   try {
-    contests = (await _fetchFallbackContests(supabase))
-        .where(_isVisibleForAppStoreReview)
-        .where((contest) => contest.isAccessibleForPlan(profile.planKey))
-        .toList();
+    contests = (await _fetchFallbackContests(
+      supabase,
+    )).where(_isVisibleForAppStoreReview).toList();
   } catch (error, stackTrace) {
     NetworkStatusService.instance.markOfflineFromError(error);
     authLogError('homeBootstrapFallbackContests', error, stackTrace);

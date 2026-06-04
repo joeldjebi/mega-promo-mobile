@@ -22,8 +22,9 @@ class PlayerPlansScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final plans = ref.watch(playerPlansProvider);
     final featureFlags = ref.watch(appFeatureFlagsProvider);
-    final fromContestId =
-        GoRouterState.of(context).uri.queryParameters['fromContest'];
+    final fromContestId = GoRouterState.of(
+      context,
+    ).uri.queryParameters['fromContest'];
     final plansContent = _PlansContent(
       plans: plans,
       fromContestId: fromContestId,
@@ -66,42 +67,46 @@ class _PlansContent extends ConsumerWidget {
   final AsyncValue<PlayerPlansData> plans;
   final String? fromContestId;
 
-  const _PlansContent({
-    required this.plans,
-    required this.fromContestId,
-  });
+  const _PlansContent({required this.plans, required this.fromContestId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return plans.when(
       data: (data) => RefreshIndicator(
         onRefresh: () => ref.refresh(playerPlansProvider.future),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-          children: [
-            _CurrentSubscriptionCard(
-              subscription: data.currentSubscription,
-            ),
-            const SizedBox(height: 16),
-            Text('Choisir un forfait', style: AppTextStyles.h2),
-            const SizedBox(height: 12),
-            ...data.plans.map(
-              (plan) => Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: _PlanCard(
-                  plan: plan,
-                  currentSubscription: data.currentSubscription,
-                  paymentMethods: data.paymentMethods,
-                  onSubscribe: () => _confirmSubscription(
-                    context,
-                    ref,
-                    plan,
-                    data.paymentMethods,
+        child: Builder(
+          builder: (context) {
+            final defaultFreePlan = _defaultFreePlan(data.plans);
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+              children: [
+                _CurrentSubscriptionCard(
+                  subscription: data.currentSubscription,
+                  defaultFreePlan: defaultFreePlan,
+                ),
+                const SizedBox(height: 16),
+                Text('Choisir un forfait', style: AppTextStyles.h2),
+                const SizedBox(height: 12),
+                ...data.plans.map(
+                  (plan) => Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _PlanCard(
+                      plan: plan,
+                      currentSubscription: data.currentSubscription,
+                      paymentMethods: data.paymentMethods,
+                      onSubscribe: () => _confirmSubscription(
+                        context,
+                        ref,
+                        plan,
+                        data.paymentMethods,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -140,6 +145,18 @@ class _PlansContent extends ConsumerWidget {
       ),
     );
   }
+}
+
+PlayerPlan? _defaultFreePlan(List<PlayerPlan> plans) {
+  for (final plan in plans) {
+    if (_isFreePlan(plan)) return plan;
+  }
+  return null;
+}
+
+bool _isFreePlan(PlayerPlan plan) {
+  final key = plan.key.trim().toLowerCase();
+  return plan.price == 0 || key == 'free' || key == 'standard';
 }
 
 class _PlansUnavailable extends StatelessWidget {
@@ -198,15 +215,19 @@ class _PlansUnavailable extends StatelessWidget {
 
 class _CurrentSubscriptionCard extends StatelessWidget {
   final PlayerSubscription? subscription;
+  final PlayerPlan? defaultFreePlan;
 
-  const _CurrentSubscriptionCard({required this.subscription});
+  const _CurrentSubscriptionCard({
+    required this.subscription,
+    required this.defaultFreePlan,
+  });
 
   @override
   Widget build(BuildContext context) {
     final status = subscription?.status;
     final isPending = status == 'pending';
     final title = subscription == null
-        ? 'Aucun forfait actif'
+        ? defaultFreePlan?.name ?? 'Forfait gratuit'
         : subscription!.planName;
 
     return AppCard(
@@ -237,7 +258,7 @@ class _CurrentSubscriptionCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   subscription == null
-                      ? 'Sélectionne un forfait pour obtenir plus d’avantages.'
+                      ? 'Actif automatiquement pour commencer à jouer.'
                       : isPending
                       ? 'En attente de validation.'
                       : 'Valide jusqu’au ${_formatDate(subscription!.expiresAt)}.',
@@ -269,9 +290,10 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasActiveSubscription = currentSubscription?.status == 'active';
     final isCurrent =
-        currentSubscription?.planId == plan.id &&
-        currentSubscription?.status == 'active';
+        (currentSubscription?.planId == plan.id && hasActiveSubscription) ||
+        (!hasActiveSubscription && _isFreePlan(plan));
     final hasPending =
         currentSubscription?.planId == plan.id &&
         currentSubscription?.status == 'pending';
