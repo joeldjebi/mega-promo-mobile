@@ -1,29 +1,21 @@
--- MegaPromo - Banques de questions par famille/categorie
--- A executer dans Supabase SQL Editor apres 202606020001, 202606020002
--- et 202606020003.
+-- MegaPromo - Nombre de questions tirees par banque JCQ
+-- A executer dans Supabase SQL Editor apres 202606020004.
 --
 -- Objectif:
--- - creer une vraie table question_banks;
--- - lier une banque a une ou plusieurs categories de concours;
--- - permettre aux questions d'appartenir a une banque sans etre liees a un
---   concours precis;
--- - tirer les questions JCQ depuis les questions de banque liees a la
---   categorie du JCQ;
---   tout en gardant l'historique joueur/device.
-
-create table if not exists public.question_banks (
-  id uuid primary key default gen_random_uuid(),
-  name text not null unique,
-  description text,
-  questions_per_quiz int not null default 3,
-  is_active bool not null default true,
-  created_by uuid references public.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+-- - permettre au SA de definir combien de questions une banque envoie dans
+--   un JCQ;
+-- - rendre cette valeur lisible et modifiable depuis le SA;
+-- - faire respecter cette valeur cote backend lors du tirage aleatoire;
+-- - bloquer le demarrage si la banque n'a pas assez de questions actives.
 
 alter table public.question_banks
 add column if not exists questions_per_quiz int not null default 3;
+
+update public.question_banks
+set questions_per_quiz = 3
+where questions_per_quiz is null
+   or questions_per_quiz < 1
+   or questions_per_quiz > 50;
 
 alter table public.question_banks
 drop constraint if exists question_banks_questions_per_quiz_check;
@@ -31,44 +23,6 @@ drop constraint if exists question_banks_questions_per_quiz_check;
 alter table public.question_banks
 add constraint question_banks_questions_per_quiz_check
 check (questions_per_quiz between 1 and 50);
-
-create table if not exists public.question_bank_categories (
-  question_bank_id uuid not null references public.question_banks(id) on delete cascade,
-  category_id uuid not null references public.categories(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  primary key (question_bank_id, category_id)
-);
-
-alter table public.questions
-alter column contest_id drop not null;
-
-alter table public.questions
-add column if not exists question_bank_id uuid references public.question_banks(id) on delete set null,
-add column if not exists category_id uuid references public.categories(id) on delete set null,
-add column if not exists partner_id uuid references public.partners(id) on delete set null,
-add column if not exists question_scope text not null default 'contest',
-add column if not exists difficulty text,
-add column if not exists is_active bool not null default true;
-
-create index if not exists questions_question_bank_idx
-  on public.questions(question_bank_id)
-  where question_bank_id is not null;
-
-create index if not exists questions_category_idx
-  on public.questions(category_id)
-  where category_id is not null;
-
-create index if not exists questions_partner_idx
-  on public.questions(partner_id)
-  where partner_id is not null;
-
-create index if not exists question_bank_categories_category_idx
-  on public.question_bank_categories(category_id);
-
-grant select on public.question_banks to authenticated, anon;
-grant insert, update, delete on public.question_banks to authenticated;
-grant select on public.question_bank_categories to authenticated, anon;
-grant insert, update, delete on public.question_bank_categories to authenticated;
 
 drop function if exists public.start_quiz_contest(uuid, int, text);
 
@@ -198,6 +152,8 @@ begin
       now(),
       'selection_mode',
       'server_random_question_bank',
+      'requested_questions_count',
+      requested_question_count,
       'device_history_enabled',
       normalized_device_session_id is not null
     ),

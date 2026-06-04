@@ -698,7 +698,6 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           'start_quiz_contest',
           params: {
             'p_contest_id': data.contest.id,
-            'p_question_count': data.contest.quizQuestionCount,
             'p_device_session_id': deviceSessionId,
           },
         );
