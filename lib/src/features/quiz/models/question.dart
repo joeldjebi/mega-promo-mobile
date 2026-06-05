@@ -1,6 +1,9 @@
 class QuizQuestion {
   final String id;
   final String contestId;
+  final String questionType;
+  final String? predictionType;
+  final Map<String, dynamic> predictionPayload;
   final String questionText;
   final String? questionImageUrl;
   final List<String> options;
@@ -12,6 +15,9 @@ class QuizQuestion {
   const QuizQuestion({
     required this.id,
     required this.contestId,
+    required this.questionType,
+    required this.predictionType,
+    required this.predictionPayload,
     required this.questionText,
     required this.questionImageUrl,
     required this.options,
@@ -25,6 +31,11 @@ class QuizQuestion {
     return QuizQuestion(
       id: json['id'] as String,
       contestId: json['contest_id'] as String? ?? '',
+      questionType: (json['question_type'] as String? ?? 'quiz')
+          .trim()
+          .toLowerCase(),
+      predictionType: _cleanUrl(json['prediction_type'] as String?),
+      predictionPayload: _jsonMap(json['prediction_payload']),
       questionText: json['question_text'] as String? ?? '',
       questionImageUrl: _cleanUrl(json['question_image_url'] as String?),
       options: [
@@ -57,6 +68,8 @@ class QuizQuestion {
 
   bool get hasQuestionImage => questionImageUrl?.isNotEmpty == true;
 
+  bool get isPronostic => questionType == 'pronostic';
+
   bool get hasImageOptions =>
       optionImageUrls.length == 4 &&
       optionImageUrls.every((url) => url?.isNotEmpty == true);
@@ -76,11 +89,17 @@ String? _cleanUrl(String? value) {
   return trimmed;
 }
 
+Map<String, dynamic> _jsonMap(Object? value) {
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return const <String, dynamic>{};
+}
+
 class QuizAnswer {
   final String questionId;
   final int? selectedIndex;
   final int correctIndex;
   final bool isCorrect;
+  final bool isPronostic;
   final int points;
   final int elapsedMs;
 
@@ -89,6 +108,7 @@ class QuizAnswer {
     required this.selectedIndex,
     required this.correctIndex,
     required this.isCorrect,
+    this.isPronostic = false,
     required this.points,
     required this.elapsedMs,
   });
@@ -99,6 +119,8 @@ class QuizAnswer {
       'selected_index': selectedIndex,
       'correct_index': correctIndex,
       'is_correct': isCorrect,
+      'is_pronostic': isPronostic,
+      'resolution_status': isPronostic ? 'pending' : 'not_required',
       'points': points,
       'elapsed_ms': elapsedMs,
     };

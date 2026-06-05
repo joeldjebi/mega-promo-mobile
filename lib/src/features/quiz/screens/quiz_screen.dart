@@ -537,8 +537,13 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
       questionId: question.id,
       selectedIndex: selectedIndex,
       correctIndex: question.correctIndex,
-      isCorrect: isCorrect,
-      points: isCorrect ? question.points : 0,
+      isCorrect: question.isPronostic ? false : isCorrect,
+      isPronostic: question.isPronostic,
+      points: question.isPronostic
+          ? 0
+          : isCorrect
+          ? question.points
+          : 0,
       elapsedMs: elapsedMs,
     );
   }
@@ -561,10 +566,31 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
         selectedIndex: null,
         correctIndex: question.correctIndex,
         isCorrect: false,
+        isPronostic: question.isPronostic,
         points: 0,
         elapsedMs: (question.timeLimit <= 0 ? 30 : question.timeLimit) * 1000,
       ),
     );
+  }
+
+  String _pronosticContextLabel(QuizQuestion question) {
+    final match = question.predictionPayload['match_label'] as String?;
+    if (match != null && match.trim().isNotEmpty) return match.trim();
+    final homeTeam = question.predictionPayload['home_team'] as String?;
+    final awayTeam = question.predictionPayload['away_team'] as String?;
+    if (homeTeam != null &&
+        homeTeam.trim().isNotEmpty &&
+        awayTeam != null &&
+        awayTeam.trim().isNotEmpty) {
+      return '${homeTeam.trim()} vs ${awayTeam.trim()}';
+    }
+    return switch (question.predictionType) {
+      'exact_score' => 'Score exact',
+      'over_under' => 'Plus ou moins de buts',
+      'scorer' => 'Buteur',
+      'match_winner' => 'Résultat du match',
+      _ => 'Pronostic football',
+    };
   }
 
   @override
@@ -576,6 +602,8 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
         : _question.timeLimit;
     final actionText = _locked
         ? (isLastQuestion ? 'Résultat dans 2 sec...' : 'Question suivante...')
+        : _question.isPronostic
+        ? 'Valide ton pronostic'
         : 'Choisis une réponse';
 
     return SafeArea(
@@ -611,9 +639,15 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                widget.isLive ? 'QUIZ LIVE' : 'QUIZ',
+                                _question.isPronostic
+                                    ? 'PRONOSTIC'
+                                    : widget.isLive
+                                    ? 'QUIZ LIVE'
+                                    : 'QUIZ',
                                 style: AppTextStyles.label.copyWith(
-                                  color: AppColors.primaryLight,
+                                  color: _question.isPronostic
+                                      ? AppColors.accentGreen
+                                      : AppColors.primaryLight,
                                 ),
                               ),
                             ),
@@ -679,13 +713,27 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
                       child: Column(
                         children: [
                           Icon(
-                            Icons.help_rounded,
-                            color: AppColors.primaryLight.withValues(
-                              alpha: 0.8,
-                            ),
+                            _question.isPronostic
+                                ? Icons.sports_soccer_rounded
+                                : Icons.help_rounded,
+                            color:
+                                (_question.isPronostic
+                                        ? AppColors.accentGreen
+                                        : AppColors.primaryLight)
+                                    .withValues(alpha: 0.8),
                             size: 30,
                           ),
                           const SizedBox(height: 12),
+                          if (_question.isPronostic) ...[
+                            Text(
+                              _pronosticContextLabel(_question),
+                              textAlign: TextAlign.center,
+                              style: AppTextStyles.label.copyWith(
+                                color: AppColors.accentGreen,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           if (_question.questionText.trim().isNotEmpty)
                             Text(
                               _question.questionText,

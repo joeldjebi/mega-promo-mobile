@@ -54,6 +54,7 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   List<QuizAnswer> get _answers =>
       widget.answers.isNotEmpty ? widget.answers : _storedAnswers ?? const [];
 
+  bool get _hasPronostic => _questions.any((question) => question.isPronostic);
   int get _correct => _answers.where((answer) => answer.isCorrect).length;
   int get _points => _answers.fold(0, (sum, answer) => sum + answer.points);
   int get _durationMs =>
@@ -70,6 +71,7 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
       selectedIndex: null,
       correctIndex: question.correctIndex,
       isCorrect: false,
+      isPronostic: question.isPronostic,
       points: 0,
       elapsedMs: (question.timeLimit <= 0 ? 30 : question.timeLimit) * 1000,
     );
@@ -204,7 +206,9 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
         .map((answer) => answer.toJson())
         .toList();
     final useBackendScoring =
-        participationId.isNotEmpty && widget.liveElapsedMs == null;
+        participationId.isNotEmpty &&
+        widget.liveElapsedMs == null &&
+        !_hasPronostic;
 
     await QuizResultSyncService.enqueue(
       userId: user.id,
@@ -260,8 +264,9 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
             .update({
               'score': points,
               'answers': {
-                'type': 'quiz',
+                'type': _hasPronostic ? 'pronostic' : 'quiz',
                 'status': 'completed',
+                if (_hasPronostic) 'resolution_status': 'pending',
                 'completed_at': DateTime.now().toIso8601String(),
                 'duration_ms': durationMs,
                 'correct_count': correctCount,
@@ -278,8 +283,9 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
           'contest_id': contestId,
           'score': points,
           'answers': {
-            'type': 'quiz',
+            'type': _hasPronostic ? 'pronostic' : 'quiz',
             'status': 'completed',
+            if (_hasPronostic) 'resolution_status': 'pending',
             'completed_at': DateTime.now().toIso8601String(),
             'duration_ms': durationMs,
             'correct_count': correctCount,
@@ -406,12 +412,16 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
   }
 
   Widget _buildResultList(BuildContext context) {
-    final icon = _ratio > 0.8
+    final icon = _hasPronostic
+        ? Icons.sports_soccer_rounded
+        : _ratio > 0.8
         ? Icons.emoji_events_rounded
         : _ratio >= 0.5
         ? Icons.auto_awesome_rounded
         : Icons.favorite_rounded;
-    final color = _ratio > 0.8
+    final color = _hasPronostic
+        ? AppColors.accentGreen
+        : _ratio > 0.8
         ? AppColors.gold
         : _ratio >= 0.5
         ? AppColors.primaryLight
@@ -444,10 +454,17 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Score final', style: AppTextStyles.h3),
+                        Text(
+                          _hasPronostic
+                              ? 'Pronostic enregistré'
+                              : 'Score final',
+                          style: AppTextStyles.h3,
+                        ),
                         const SizedBox(height: 2),
                         Text(
-                          '+$_points points',
+                          _hasPronostic
+                              ? 'En attente de validation'
+                              : '+$_points points',
                           style: AppTextStyles.price.copyWith(fontSize: 16),
                         ),
                       ],
@@ -460,15 +477,19 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                 children: [
                   Expanded(
                     child: _ResultStat(
-                      label: 'Bonnes réponses',
-                      value: '$_correct/${_questions.length}',
+                      label: _hasPronostic ? 'Pronostics' : 'Bonnes réponses',
+                      value: _hasPronostic
+                          ? '${_questions.length} joué(s)'
+                          : '$_correct/${_questions.length}',
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _ResultStat(
-                      label: 'Réussite',
-                      value: '${(_ratio * 100).round()}%',
+                      label: _hasPronostic ? 'Statut' : 'Réussite',
+                      value: _hasPronostic
+                          ? 'À résoudre'
+                          : '${(_ratio * 100).round()}%',
                     ),
                   ),
                 ],
@@ -499,10 +520,14 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        answer.isCorrect
+                        question.isPronostic
+                            ? Icons.pending_actions_rounded
+                            : answer.isCorrect
                             ? Icons.check_circle_rounded
                             : Icons.cancel_rounded,
-                        color: answer.isCorrect
+                        color: question.isPronostic
+                            ? AppColors.accentGreen
+                            : answer.isCorrect
                             ? AppColors.accentGreen
                             : AppColors.accentRed,
                       ),
@@ -546,7 +571,11 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                       itemBuilder: (context, optionIndex) {
                         final isCorrect = optionIndex == answer.correctIndex;
                         final isSelected = optionIndex == answer.selectedIndex;
-                        final color = isCorrect
+                        final color = question.isPronostic
+                            ? isSelected
+                                  ? AppColors.accentGreen
+                                  : AppColors.surfaceBorder
+                            : isCorrect
                             ? AppColors.accentGreen
                             : isSelected
                             ? AppColors.accentRed
@@ -573,20 +602,27 @@ class _QuizResultScreenState extends ConsumerState<QuizResultScreen> {
                     runSpacing: 8,
                     children: [
                       _AnswerPill(
-                        label: 'Ta réponse',
+                        label: question.isPronostic
+                            ? 'Ton pronostic'
+                            : 'Ta réponse',
                         value: _answerText(question, answer.selectedIndex),
-                        color: answer.isCorrect
+                        color: question.isPronostic
+                            ? AppColors.accentGreen
+                            : answer.isCorrect
                             ? AppColors.accentGreen
                             : AppColors.accentRed,
                       ),
+                      if (!question.isPronostic)
+                        _AnswerPill(
+                          label: 'Bonne réponse',
+                          value: _answerText(question, answer.correctIndex),
+                          color: AppColors.primaryLight,
+                        ),
                       _AnswerPill(
-                        label: 'Bonne réponse',
-                        value: _answerText(question, answer.correctIndex),
-                        color: AppColors.primaryLight,
-                      ),
-                      _AnswerPill(
-                        label: 'Points',
-                        value: '+${answer.points}',
+                        label: question.isPronostic ? 'Statut' : 'Points',
+                        value: question.isPronostic
+                            ? 'En attente'
+                            : '+${answer.points}',
                         color: AppColors.gold,
                       ),
                       _AnswerPill(
@@ -652,6 +688,7 @@ QuizAnswer _quizAnswerFromJson(Map<String, dynamic> json) {
     selectedIndex: (json['selected_index'] as num?)?.toInt(),
     correctIndex: (json['correct_index'] as num?)?.toInt() ?? 0,
     isCorrect: json['is_correct'] as bool? ?? false,
+    isPronostic: json['is_pronostic'] as bool? ?? false,
     points: (json['points'] as num?)?.toInt() ?? 0,
     elapsedMs: (json['elapsed_ms'] as num?)?.toInt() ?? 0,
   );
