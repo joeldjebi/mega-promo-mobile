@@ -379,6 +379,34 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   bool get _planAccessDenied =>
       !data.contest.isAccessibleForPlan(data.userProfile.planKey);
 
+  bool get _hasPaidPlanRequirement {
+    return data.contest.allowedPlayerPlanKeys.any((key) {
+      final normalizedKey = key.trim().toLowerCase();
+      return normalizedKey.isNotEmpty &&
+          normalizedKey != 'free' &&
+          normalizedKey != 'standard';
+    });
+  }
+
+  String get _planAccessTitle {
+    if (!_planAccessDenied) return 'Forfait requis validé';
+    if (data.contest.isLive) return 'Quiz Live réservé';
+    if (data.contest.type == ContestType.quiz) return 'JCQ réservé';
+    return 'Accès réservé';
+  }
+
+  String get _planAccessMessage {
+    final requiredPlan = data.contest.accessLabel;
+    final currentPlan = data.userProfile.planName.trim().isEmpty
+        ? 'Standard'
+        : data.userProfile.planName.trim();
+    if (!_planAccessDenied) {
+      return 'Ton forfait actuel ($currentPlan) te donne accès à ce concours.';
+    }
+    return 'Ton forfait actuel ($currentPlan) ne permet pas encore de participer. '
+        'Ce concours est réservé aux joueurs $requiredPlan.';
+  }
+
   bool get _isWaitingRoomOpen {
     if (!data.contest.isLiveReservationOpen) return false;
     final liveStartsAt = data.contest.liveStartsAt;
@@ -419,7 +447,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       _isLiveRegisteredAndWaiting;
 
   String get _buttonText {
-    if (_planAccessDenied) return 'Réservé ${data.contest.accessLabel}';
+    if (_planAccessDenied) return 'Voir les offres';
     if (data.contest.isLive) {
       if (!data.contest.isLiveReady) return 'Arène en préparation';
       if (data.contest.isLiveEnded) return 'Quiz Live terminé';
@@ -855,12 +883,16 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                     const SizedBox(height: 14),
                     _LiveQuizArenaCard(data: data),
                   ],
-                  if (_planAccessDenied) ...[
+                  if (_hasPaidPlanRequirement) ...[
                     const SizedBox(height: 14),
-                    _StatusNoticeCard(
-                      icon: Icons.lock_rounded,
-                      label: 'Accès ${contest.accessLabel}',
-                      color: AppColors.gold,
+                    _AccessRequirementCard(
+                      icon: _planAccessDenied
+                          ? Icons.lock_rounded
+                          : Icons.verified_rounded,
+                      title: _planAccessTitle,
+                      body: _planAccessMessage,
+                      badge: 'Requis: ${contest.accessLabel}',
+                      isUnlocked: !_planAccessDenied,
                     ),
                   ],
                   if (!contest.isLive &&
@@ -1385,6 +1417,91 @@ class _StatusNoticeCard extends StatelessWidget {
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w800,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccessRequirementCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  final String badge;
+  final bool isUnlocked;
+
+  const _AccessRequirementCard({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.badge,
+    this.isUnlocked = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = isUnlocked ? AppColors.accentGreen : AppColors.gold;
+    return AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: accentColor.withValues(alpha: 0.28)),
+            ),
+            child: Icon(icon, color: accentColor, size: 20),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: AppTextStyles.h3.copyWith(fontSize: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: accentColor.withValues(alpha: 0.24),
+                        ),
+                      ),
+                      child: Text(
+                        badge,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: accentColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  body,
+                  style: AppTextStyles.bodySecondary.copyWith(fontSize: 12),
+                ),
+              ],
             ),
           ),
         ],

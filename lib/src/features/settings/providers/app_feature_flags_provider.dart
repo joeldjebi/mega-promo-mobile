@@ -23,7 +23,7 @@ class AppFeatureFlags {
     appMaintenanceEnabled: false,
     playerProfileCoordinatesEnabled: true,
     playerProfileRewardsEnabled: true,
-    appReviewSafeEnabled: true,
+    appReviewSafeEnabled: false,
   );
 
   AppFeatureFlags copyWith({
@@ -36,7 +36,8 @@ class AppFeatureFlags {
     return AppFeatureFlags(
       playerSubscriptionsEnabled:
           playerSubscriptionsEnabled ?? this.playerSubscriptionsEnabled,
-      appMaintenanceEnabled: appMaintenanceEnabled ?? this.appMaintenanceEnabled,
+      appMaintenanceEnabled:
+          appMaintenanceEnabled ?? this.appMaintenanceEnabled,
       playerProfileCoordinatesEnabled:
           playerProfileCoordinatesEnabled ??
           this.playerProfileCoordinatesEnabled,
@@ -57,7 +58,7 @@ class AppFeatureFlags {
     var appMaintenanceEnabled = false;
     var playerProfileCoordinatesEnabled = true;
     var playerProfileRewardsEnabled = true;
-    var appReviewSafeEnabled = true;
+    var appReviewSafeEnabled = false;
 
     for (final row in rows) {
       if (row is! Map<String, dynamic>) continue;

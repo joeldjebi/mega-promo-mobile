@@ -254,8 +254,9 @@ class Contest {
         normalizedStatus == 'finished') {
       return true;
     }
+    if (!computedLiveEndsAt.isAfter(SyncedClockService.now())) return true;
     if (!isLivePlayableStatus) return false;
-    return !computedLiveEndsAt.isAfter(SyncedClockService.now());
+    return false;
   }
 
   bool get isLiveReady =>

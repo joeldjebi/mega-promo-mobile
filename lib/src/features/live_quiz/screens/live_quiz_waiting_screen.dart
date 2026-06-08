@@ -39,10 +39,10 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
   DateTime? _backgroundedAt;
   DateTime? _lastRealtimeUpdateAt;
   DateTime? _lastNetworkIssueAt;
+  DateTime? _lastAutoStartAttemptAt;
   bool _isJoining = false;
   bool _isStarting = false;
   bool _hasJoinedWaitingRoom = false;
-  bool _classicWaitingNotificationShown = false;
   bool _autoStartFailed = false;
   bool _isPreloadingAssets = false;
   bool _hasPreloadedAssets = false;
@@ -52,9 +52,13 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
   Duration _remaining = Duration.zero;
   Duration? _lastServerLatency;
   int _connectionQuality = 72;
+  int _autoStartAttempts = 0;
   int? _lastRenderedServerSecond;
   String? _lastLiveActivitySignature;
   String? _preloadedAssetsSignature;
+
+  static const _autoStartRetryDelay = Duration(seconds: 3);
+  static const _autoStartMaxAttempts = 12;
 
   @override
   void initState() {
@@ -280,16 +284,42 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     }
 
     if (!remaining.isNegative && remaining > Duration.zero) return;
-    if (_autoStartFailed) return;
+    final lastAttemptAt = _lastAutoStartAttemptAt;
+    if (_isStarting ||
+        (_autoStartFailed && _autoStartAttempts >= _autoStartMaxAttempts) ||
+        (lastAttemptAt != null &&
+            DateTime.now().difference(lastAttemptAt) < _autoStartRetryDelay)) {
+      return;
+    }
+    _lastAutoStartAttemptAt = DateTime.now();
+    _autoStartAttempts += 1;
     unawaited(_startQuiz());
   }
 
   Future<void> _startQuiz({bool manual = false}) async {
     if (_isStarting) return;
-    final detail = ref.read(contestDetailProvider(widget.contestId)).value;
+    var detail = ref.read(contestDetailProvider(widget.contestId)).value;
     if (detail == null) return;
 
-    if (manual) _autoStartFailed = false;
+    if (manual) {
+      _autoStartFailed = false;
+      _autoStartAttempts = 0;
+    }
+
+    final now = SyncedClockService.now();
+    final liveStartsAt = detail.contest.liveStartsAt;
+    final shouldForceServerSync =
+        detail.contest.isLive &&
+        liveStartsAt != null &&
+        !now.isBefore(liveStartsAt);
+
+    if (shouldForceServerSync) {
+      detail =
+          await _refreshContestDetailFromServer(forceProcessLiveEvents: true) ??
+          detail;
+      if (!mounted) return;
+    }
+
     if (detail.contest.isLiveEnded) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -299,14 +329,32 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
       return;
     }
 
-    final liveStartsAt = detail.contest.liveStartsAt;
+    final refreshedLiveStartsAt = detail.contest.liveStartsAt;
     final canAttemptStart =
         detail.contest.isLiveActiveNow ||
         (detail.contest.isLiveWaitingStatus &&
-            liveStartsAt != null &&
-            !SyncedClockService.now().isBefore(liveStartsAt));
+            refreshedLiveStartsAt != null &&
+            !SyncedClockService.now().isBefore(refreshedLiveStartsAt));
 
     if (!detail.contest.isLiveReady || !canAttemptStart) {
+      if (!manual) {
+        _autoStartFailed = true;
+        unawaited(
+          AppLogger.warning(
+            'live_quiz',
+            'auto_start_deferred',
+            'Demarrage automatique differe: etat QL pas encore pret.',
+            entityType: 'contest',
+            entityId: widget.contestId,
+            metadata: {
+              'live_status': detail.contest.liveStatus,
+              'is_live_ready': detail.contest.isLiveReady,
+              'attempt': _autoStartAttempts,
+            },
+          ),
+        );
+        return;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -321,6 +369,12 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     }
 
     if (!await NetworkStatusService.instance.ensureOnline()) {
+      if (!manual) {
+        _autoStartFailed = true;
+        _lastNetworkIssueAt = DateTime.now();
+        _recomputeConnectionQuality();
+        return;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -352,20 +406,61 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
         ),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppTelemetryService.userMessageForError(
-              error,
-              fallback: 'Le démarrage automatique a échoué. Réessaie.',
+      if (manual) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppTelemetryService.userMessageForError(
+                error,
+                fallback: 'Le démarrage automatique a échoué. Réessaie.',
+              ),
             ),
           ),
-        ),
-      );
+        );
+      }
       setState(() {
         _isStarting = false;
         _autoStartFailed = true;
       });
+    }
+  }
+
+  Future<ContestDetailData?> _refreshContestDetailFromServer({
+    required bool forceProcessLiveEvents,
+  }) async {
+    try {
+      await SyncedClockService.sync(force: true);
+      if (forceProcessLiveEvents &&
+          NetworkStatusService.instance.canAttemptNetwork) {
+        await Supabase.instance.client.rpc('process_live_quiz_events');
+      }
+      clearContestDetailCache(widget.contestId);
+      ref.invalidate(contestDetailProvider(widget.contestId));
+      return await ref.read(contestDetailProvider(widget.contestId).future);
+    } catch (error, stackTrace) {
+      if (AppTelemetryService.isRetryableNetworkError(error)) {
+        _lastNetworkIssueAt = DateTime.now();
+        _recomputeConnectionQuality();
+      }
+      unawaited(
+        AppLogger.warning(
+          'live_quiz',
+          'refresh_live_state_failed',
+          'Impossible de rafraichir etat QL avant demarrage.',
+          entityType: 'contest',
+          entityId: widget.contestId,
+          metadata: {'error': error.toString()},
+        ),
+      );
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'live_quiz_refresh_before_start_failed',
+          context: {'contest_id': widget.contestId},
+        ),
+      );
+      return null;
     }
   }
 
@@ -661,7 +756,6 @@ class _LiveQuizWaitingScreenState extends ConsumerState<LiveQuizWaitingScreen>
     _lastLiveActivitySignature = signature;
 
     const showClassicNotification = false;
-    _classicWaitingNotificationShown = true;
 
     unawaited(
       LiveQuizNotificationService.showWaitingNotification(

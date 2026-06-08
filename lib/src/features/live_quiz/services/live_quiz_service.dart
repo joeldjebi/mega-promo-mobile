@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_logger.dart';
 import '../../../services/network_status_service.dart';
+import '../../../services/synced_clock_service.dart';
 import '../../contests/providers/contest_providers.dart';
 
 class LiveQuizStartResult {
@@ -21,7 +22,30 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
   final user = supabase.auth.currentUser;
   if (user == null) throw StateError('Utilisateur non connecté.');
 
-  if (data.contest.isLive && !data.contest.isLiveReady) {
+  final liveStartsAt = data.contest.liveStartsAt;
+  final hasReachedLiveStart =
+      data.contest.isLive &&
+      liveStartsAt != null &&
+      !SyncedClockService.now().isBefore(liveStartsAt);
+
+  if (hasReachedLiveStart) {
+    try {
+      await supabase.rpc('process_live_quiz_events');
+    } catch (error) {
+      await AppLogger.warning(
+        'live_quiz',
+        'process_events_before_start_failed',
+        'Impossible de synchroniser les evenements QL avant demarrage.',
+        entityType: 'contest',
+        entityId: data.contest.id,
+        metadata: {'error': error.toString()},
+      );
+    }
+  }
+
+  if (data.contest.isLive &&
+      !data.contest.isLiveReady &&
+      !hasReachedLiveStart) {
     throw StateError('L’arène du Quiz Live se prépare. Reviens vite.');
   }
 
@@ -31,7 +55,8 @@ Future<LiveQuizStartResult> startLiveQuizParticipation({
 
   if (data.contest.isLive &&
       !data.contest.isLiveActiveNow &&
-      !data.contest.isLiveWaitingStatus) {
+      !data.contest.isLiveWaitingStatus &&
+      !hasReachedLiveStart) {
     throw StateError(
       data.contest.isLiveQueued
           ? 'Ce Quiz Live est dans la file d’attente.'

@@ -170,10 +170,7 @@ class _NotificationTile extends StatelessWidget {
                   ),
                   if (notification.body.isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    Text(
-                      notification.body,
-                      style: AppTextStyles.bodySecondary,
-                    ),
+                    Text(notification.body, style: AppTextStyles.bodySecondary),
                   ],
                   const SizedBox(height: 8),
                   Text(
@@ -207,9 +204,7 @@ class _NotificationTile extends StatelessWidget {
                     );
                     if (!deleted || !context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Notification supprimée.'),
-                      ),
+                      const SnackBar(content: Text('Notification supprimée.')),
                     );
                     return;
                 }
@@ -311,6 +306,11 @@ void _openNotificationTarget(
       notification.data['contestId'] as String?;
 
   if (contestId != null && contestId.isNotEmpty) {
+    if (notification.type == 'live_quiz_waiting' ||
+        notification.type == 'live_quiz_reminder') {
+      context.go('/contests/$contestId/live-waiting');
+      return;
+    }
     context.go('/contests/$contestId');
     return;
   }
@@ -420,6 +420,7 @@ IconData _iconForType(String type) {
     'subscription' => Icons.workspace_premium_rounded,
     'contest_finished' => Icons.flag_rounded,
     'contest' => Icons.campaign_rounded,
+    'live_quiz_waiting' || 'live_quiz_reminder' => Icons.bolt_rounded,
     'leaderboard' => Icons.leaderboard_rounded,
     _ => Icons.notifications_rounded,
   };

@@ -5,7 +5,7 @@ class AppStoreReviewMode {
 
   static const bool _reviewSafeBuildDefault = bool.fromEnvironment(
     'MEGA_PROMO_REVIEW_SAFE',
-    defaultValue: true,
+    defaultValue: false,
   );
   static bool _runtimeEnabled = _reviewSafeBuildDefault;
 
