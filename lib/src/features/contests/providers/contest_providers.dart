@@ -491,7 +491,7 @@ class ContestDrawSettings {
       premiumTickets: (json['premium_tickets'] as num?)?.toInt() ?? 2,
       confirmationMessage:
           json['confirmation_message'] as String? ??
-          'Participation validée ! Les lauréats seront annoncés bientôt.',
+          'Participation validée ! Les vainqueurs seront annoncés bientôt.',
       winnerAnnouncementAt: DateTime.tryParse(
         json['winner_announcement_at'] as String? ?? '',
       ),

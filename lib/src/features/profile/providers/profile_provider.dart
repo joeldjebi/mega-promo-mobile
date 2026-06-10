@@ -37,7 +37,7 @@ final profileDataProvider = FutureProvider<ProfileData>((ref) async {
     'profileParticipations',
     () => supabase
         .from('participations')
-        .select('id, score, participated_at, contests(title)')
+        .select('id, contest_id, score, participated_at, contests(title)')
         .eq('user_id', userId)
         .order('participated_at', ascending: false)
         .limit(5),
@@ -72,7 +72,9 @@ Future<List<Map<String, dynamic>>> fetchProfileParticipationsPage({
     'profileParticipationsPage',
     () => supabase
         .from('participations')
-        .select('id, score, participated_at, completed, contests(title)')
+        .select(
+          'id, contest_id, score, participated_at, completed, contests(title)',
+        )
         .eq('user_id', user.id)
         .order('participated_at', ascending: false)
         .range(offset, offset + limit - 1),

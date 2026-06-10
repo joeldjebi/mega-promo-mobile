@@ -480,7 +480,13 @@ List<_GamingBadgeData> _contestGamingBadges(
   Contest contest, {
   required bool hasParticipated,
 }) {
-  final badges = <_GamingBadgeData>[];
+  final badges = <_GamingBadgeData>[
+    _GamingBadgeData(
+      icon: _contestCategoryIcon(contest),
+      label: _contestCategoryLabel(contest),
+      color: contest.type.color,
+    ),
+  ];
 
   if (hasParticipated) {
     badges.add(
@@ -490,35 +496,14 @@ List<_GamingBadgeData> _contestGamingBadges(
         color: AppColors.accentGreen,
       ),
     );
-  } else if (contest.isBoosted) {
-    badges.add(
-      const _GamingBadgeData(
-        icon: Icons.bolt_rounded,
-        label: 'BOOST',
-        color: AppColors.primary,
-      ),
-    );
   }
 
-  badges.add(
-    _GamingBadgeData(
-      icon: contest.winnersCount > 1
-          ? Icons.emoji_events_rounded
-          : Icons.workspace_premium_rounded,
-      label: contest.winnersCount > 1 ? '${contest.winnersCount} WINS' : 'PRIX',
-      color: AppColors.gold,
-    ),
-  );
+  return badges;
+}
 
-  badges.add(
-    _GamingBadgeData(
-      icon: contest.type.icon,
-      label: contest.type.filterLabel.toUpperCase(),
-      color: contest.type.color,
-    ),
-  );
-
-  return badges.take(3).toList(growable: false);
+IconData _contestCategoryIcon(Contest contest) {
+  final category = contest.categoryData;
+  return category?.icon ?? contest.type.icon;
 }
 
 class _HomeCategoryFilters extends StatelessWidget {
@@ -912,6 +897,7 @@ class _FeaturedContestCard extends StatelessWidget {
         child: LayoutBuilder(
           builder: (_, _) {
             return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: SingleChildScrollView(
@@ -930,8 +916,6 @@ class _FeaturedContestCard extends StatelessWidget {
                               contest,
                               hasParticipated: hasParticipated,
                             ).map(_GamingBadge.new),
-                            if (contest.brandLogoUrl?.isNotEmpty == true)
-                              _BrandLogo(url: contest.brandLogoUrl!, size: 24),
                             Container(
                               constraints: BoxConstraints(
                                 maxWidth: math.min(width - 24, 220),
@@ -957,7 +941,7 @@ class _FeaturedContestCard extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   Flexible(
-                                    child: ContestTimer(
+                                    child: ContestDeadlineLabel(
                                       endsAt: contest.computedLiveEndsAt,
                                       style: AppTextStyles.bodySmall.copyWith(
                                         fontSize: 9.5,
@@ -969,22 +953,41 @@ class _FeaturedContestCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          contest.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.h2.copyWith(
-                            fontSize: 15.5,
-                            height: 1.12,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          _formatPrize(contest.prizeValue),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.price.copyWith(fontSize: 19.5),
+                        const SizedBox(height: 10),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (contest.brandLogoUrl?.isNotEmpty == true)
+                              _BrandLogo(url: contest.brandLogoUrl!, size: 52)
+                            else
+                              _HomeContestIcon(contest: contest, size: 52),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    contest.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.h2.copyWith(
+                                      fontSize: 15.5,
+                                      height: 1.12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    _formatPrize(contest.prizeValue),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.price.copyWith(
+                                      fontSize: 19.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         _FeaturedMeta(
@@ -1614,152 +1617,143 @@ class _CompactContestCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final participantsCount = contest.participantsCount;
-    final hasLimit = contest.maxParticipants > 0;
-    final now = SyncedClockService.now();
-    final startsAt = contest.startsAt ?? now;
-    final totalDuration = contest.computedLiveEndsAt
-        .difference(startsAt)
-        .inSeconds;
-    final elapsedDuration = now.difference(startsAt).inSeconds;
-    final timeProgress = totalDuration <= 0
-        ? 1.0
-        : (elapsedDuration / totalDuration).clamp(0.0, 1.0);
-    final progress = hasLimit
-        ? (participantsCount / contest.maxParticipants).clamp(0.0, 1.0)
-        : timeProgress;
-    final progressLabel = hasLimit
-        ? '$participantsCount/${contest.maxParticipants}'
-        : '${(timeProgress * 100).round()}%';
-
-    return InkWell(
-      onTap: () => context.push('/contests/${contest.id}'),
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(13),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: contest.type.color.withValues(alpha: 0.22),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primaryDark.withValues(alpha: 0.07),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Row(
+    return AppCard(
+      onTap: () {
+        clearContestDetailCache(contest.id);
+        context.push('/contests/${contest.id}');
+      },
+      padding: const EdgeInsets.all(13),
+      borderRadius: 18,
+      child: Row(
+        children: [
+          _HomeContestIcon(contest: contest, size: 44),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: contest.type.color.withValues(alpha: 0.24),
-                    ),
-                  ),
-                  child: contest.brandLogoUrl?.isNotEmpty == true
-                      ? _BrandLogo(url: contest.brandLogoUrl!, size: 42)
-                      : Icon(
-                          contest.type.icon,
-                          color: contest.type.color,
-                          size: 20,
-                        ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 4,
-                        children:
-                            _contestGamingBadges(
-                                  contest,
-                                  hasParticipated: hasParticipated,
-                                )
-                                .map(
-                                  (badge) => _GamingBadge(badge, compact: true),
-                                )
-                                .toList(),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        contest.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.h2.copyWith(fontSize: 14.8),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatPrize(contest.prizeValue),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.price.copyWith(fontSize: 13.5),
-                      ),
-                    ],
+                Text(
+                  contest.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.h3.copyWith(
+                    color: AppColors.textPrimary,
+                    fontSize: 15,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                const SizedBox(height: 4),
+                Text(
+                  _formatPrize(contest.prizeValue),
+                  style: AppTextStyles.price.copyWith(
+                    color: AppColors.gold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _CategoryBadge(label: _contestCategoryLabel(contest)),
-                    const SizedBox(height: 8),
-                    ContestTimer(
-                      endsAt: contest.computedLiveEndsAt,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w900,
+                    if (hasParticipated)
+                      const _ParticipatedBadge(compact: true),
+                    _InlineMeta(
+                      icon: Icons.visibility_rounded,
+                      label: _contestAudienceLabel(contest),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Flexible(
+                      child: ContestDeadlineLabel(
+                        endsAt: contest.computedLiveEndsAt,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textHint,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        ' · ${_winnerText(contest)} après la fin',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textHint,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    hasLimit ? 'Places' : 'Temps',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textHint,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Text(
-                  progressLabel,
-                  style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 3,
-                backgroundColor: AppColors.separator,
-                valueColor: AlwaysStoppedAnimation<Color>(contest.type.color),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _HomeContestIcon extends StatelessWidget {
+  final Contest contest;
+  final double size;
+
+  const _HomeContestIcon({required this.contest, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final logoUrl = contest.brandLogoUrl;
+    if (logoUrl?.isNotEmpty == true) {
+      return _BrandLogo(url: logoUrl!, size: size);
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: contest.type.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.surfaceBorder, width: 0.8),
+      ),
+      child: Icon(
+        contest.type.icon,
+        color: contest.type.color,
+        size: size * 0.5,
+      ),
+    );
+  }
+}
+
+class _InlineMeta extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _InlineMeta({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: AppColors.textHint, size: 13),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.bodySmall.copyWith(
+            fontSize: 10.5,
+            color: AppColors.textHint,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1961,8 +1955,7 @@ class _CategoryBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(maxWidth: 86),
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(999),
@@ -1974,7 +1967,7 @@ class _CategoryBadge extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: AppTextStyles.bodySmall.copyWith(
           fontSize: 10.5,
-          color: AppColors.primaryLight,
+          color: AppColors.primary,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -2073,6 +2066,13 @@ String _formatPrize(num value) {
     return 'Récompense partenaire';
   }
   return formatCurrencyAmount(value);
+}
+
+String _contestAudienceLabel(Contest contest) {
+  if (contest.isLive) {
+    return '${contest.registeredCount} inscrit${contest.registeredCount > 1 ? 's' : ''}';
+  }
+  return '${contest.viewsCount} vue${contest.viewsCount > 1 ? 's' : ''}';
 }
 
 String _winnerText(Contest contest) {

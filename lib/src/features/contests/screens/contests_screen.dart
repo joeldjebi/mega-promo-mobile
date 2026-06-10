@@ -342,18 +342,6 @@ String _contestAudienceLabel(Contest contest) {
   return '${contest.viewsCount} vue${contest.viewsCount > 1 ? 's' : ''}';
 }
 
-DateTime _contestCountdownTarget(Contest contest) {
-  final liveStartsAt = contest.liveStartsAt;
-  if (contest.isLive &&
-      !contest.isLiveActiveNow &&
-      !contest.isLiveEnded &&
-      liveStartsAt != null &&
-      DateTime.now().isBefore(liveStartsAt)) {
-    return liveStartsAt;
-  }
-  return contest.computedLiveEndsAt;
-}
-
 class _ContestList extends StatelessWidget {
   final List<Contest> contests;
   final Set<String> participatedContestIds;
@@ -466,50 +454,52 @@ class _ListContestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 5,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       if (isEndedLive)
                         const _EndedLiveBadge()
-                      else if (hasParticipated)
-                        const _ParticipatedBadge()
                       else
                         _SmallBadge(label: _contestBadgeLabel(contest)),
-                      const SizedBox(width: 8),
+                      if (!isEndedLive && hasParticipated)
+                        const _ParticipatedBadge(),
                       _InlineMeta(
                         icon: contest.isLive
                             ? Icons.groups_rounded
                             : Icons.visibility_rounded,
                         label: _contestAudienceLabel(contest),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: isEndedLive
-                            ? Text(
-                                'Terminé',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textHint,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              )
-                            : ContestTimer(
-                                endsAt: _contestCountdownTarget(contest),
-                              ),
-                      ),
                     ],
                   ),
                   if (!isEndedLive) ...[
                     const SizedBox(height: 5),
-                    Text(
-                      'Fin ${_shortDateTime(contest.computedLiveEndsAt)} · ${_winnerText(contest)} après la fin',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textHint,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: ContestDeadlineLabel(
+                            endsAt: contest.computedLiveEndsAt,
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textHint,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            ' · ${_winnerText(contest)} après la fin',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textHint,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],
@@ -555,13 +545,15 @@ class _GridContestCard extends StatelessWidget {
                 const Spacer(),
                 if (isEndedLive)
                   const _EndedLiveBadge(compact: true)
-                else if (hasParticipated)
-                  const _ParticipatedBadge(compact: true)
                 else
                   _SmallBadge(
                     label: _contestBadgeLabel(contest),
                     compact: true,
                   ),
+                if (!isEndedLive && hasParticipated) ...[
+                  const SizedBox(width: 6),
+                  const _ParticipatedBadge(compact: true),
+                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -597,14 +589,9 @@ class _GridContestCard extends StatelessWidget {
             ),
             if (!isEndedLive) ...[
               const SizedBox(height: 4),
-              _InlineMeta(
-                icon: Icons.event_available_rounded,
-                label: 'Fin ${_shortDateTime(contest.computedLiveEndsAt)}',
-              ),
-              const SizedBox(height: 3),
-              _InlineMeta(
-                icon: Icons.emoji_events_rounded,
-                label: '${_winnerText(contest)} après la fin',
+              _InlineDeadlineWinnerMeta(
+                endsAt: contest.computedLiveEndsAt,
+                winnerLabel: '${_winnerText(contest)} après la fin',
               ),
             ],
             const Spacer(),
@@ -618,11 +605,6 @@ class _GridContestCard extends StatelessWidget {
                   fontSize: 10.5,
                   fontWeight: FontWeight.w800,
                 ),
-              )
-            else
-              ContestTimer(
-                endsAt: _contestCountdownTarget(contest),
-                style: AppTextStyles.bodySmall.copyWith(fontSize: 10.5),
               ),
           ],
         ),
@@ -840,6 +822,60 @@ class _InlineMeta extends StatelessWidget {
   }
 }
 
+class _InlineDeadlineWinnerMeta extends StatelessWidget {
+  final DateTime endsAt;
+  final String winnerLabel;
+
+  const _InlineDeadlineWinnerMeta({
+    required this.endsAt,
+    required this.winnerLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(
+          Icons.event_available_rounded,
+          color: AppColors.textHint,
+          size: 13,
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: ContestDeadlineLabel(
+            endsAt: endsAt,
+            style: AppTextStyles.bodySmall.copyWith(
+              fontSize: 10.5,
+              color: AppColors.textHint,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          ' · ',
+          style: AppTextStyles.bodySmall.copyWith(
+            fontSize: 10.5,
+            color: AppColors.textHint,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        Flexible(
+          child: Text(
+            winnerLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall.copyWith(
+              fontSize: 10.5,
+              color: AppColors.textHint,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _EmptyContestList extends StatelessWidget {
   const _EmptyContestList();
 
@@ -892,13 +928,6 @@ String _formatPrize(num value) {
   return formatCurrencyAmount(value);
 }
 
-String _shortDateTime(DateTime date) {
-  return 'le ${date.day.toString().padLeft(2, '0')}/'
-      '${date.month.toString().padLeft(2, '0')} à '
-      '${date.hour.toString().padLeft(2, '0')}:'
-      '${date.minute.toString().padLeft(2, '0')}';
-}
-
 String _winnerText(Contest contest) {
   if (AppStoreReviewMode.enabled) {
     return contest.winnersCount > 1
@@ -906,6 +935,6 @@ String _winnerText(Contest contest) {
         : '1 récompense';
   }
   return contest.winnersCount > 1
-      ? '${contest.winnersCount} lauréats'
-      : '1 lauréat';
+      ? '${contest.winnersCount} vainqueurs'
+      : '1 vainqueur';
 }

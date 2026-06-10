@@ -903,6 +903,7 @@ class _ProfileActionPanel extends StatelessWidget {
           title: 'Toutes mes participations',
           icon: Icons.history_rounded,
           loader: () => fetchProfileParticipationsPage(limit: 50),
+          onRowTap: (row) => _openParticipationResult(context, row),
         ),
       ),
       if (showRewardsAction)
@@ -2597,8 +2598,9 @@ class _ActivitySection extends StatelessWidget {
 class _ActivityRow extends StatelessWidget {
   final Map<String, dynamic> row;
   final IconData icon;
+  final VoidCallback? onTap;
 
-  const _ActivityRow({required this.row, required this.icon});
+  const _ActivityRow({required this.row, required this.icon, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2611,42 +2613,52 @@ class _ActivityRow extends StatelessWidget {
     final score = row['score'] as int?;
 
     return AppCard(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.zero,
       borderRadius: 16,
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: AppColors.primaryLight, size: 21),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.body,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
                 ),
-                if (score != null || status != null) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    status ?? '$score points',
-                    style: AppTextStyles.bodySmall,
-                  ),
-                ],
-              ],
-            ),
+                child: Icon(icon, color: AppColors.primaryLight, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.body,
+                    ),
+                    if (score != null || status != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        status ?? '$score points',
+                        style: AppTextStyles.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textHint,
+              ),
+            ],
           ),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
-        ],
+        ),
       ),
     );
   }
@@ -2675,7 +2687,7 @@ class _Section extends StatelessWidget {
             Icon(icon, color: AppColors.primaryLight, size: 20),
             const SizedBox(width: 9),
             Expanded(child: Text(title, style: AppTextStyles.h2)),
-            if (trailing != null) trailing!,
+            ?trailing,
           ],
         ),
         const SizedBox(height: 12),
@@ -2711,6 +2723,7 @@ void _showProfileActivitySheet(
   required String title,
   required IconData icon,
   required Future<List<Map<String, dynamic>>> Function() loader,
+  void Function(Map<String, dynamic> row)? onRowTap,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -2777,6 +2790,9 @@ void _showProfileActivitySheet(
                                 return _ActivityRow(
                                   row: rows[index],
                                   icon: icon,
+                                  onTap: onRowTap == null
+                                      ? null
+                                      : () => onRowTap(rows[index]),
                                 );
                               },
                             ),
@@ -2790,6 +2806,13 @@ void _showProfileActivitySheet(
       );
     },
   );
+}
+
+void _openParticipationResult(BuildContext context, Map<String, dynamic> row) {
+  final participationId = row['id'] as String? ?? '';
+  if (participationId.isEmpty) return;
+  Navigator.of(context).pop();
+  context.go('/participations/$participationId/result');
 }
 
 void _showBadgesSheet(BuildContext context, List<Map<String, dynamic>> badges) {

@@ -12,6 +12,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:shimmer/shimmer.dart';
 
+import '../../auth/providers/auth_provider.dart';
 import '../providers/rewards_provider.dart';
 
 class RewardVictoryScreen extends ConsumerStatefulWidget {
@@ -50,6 +51,34 @@ class _RewardVictoryScreenState extends ConsumerState<RewardVictoryScreen>
     context.go('/rewards');
   }
 
+  Future<void> _openParticipationResult(WinnerVictoryDetail detail) async {
+    final supabase = ref.read(supabaseProvider);
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final row = await supabase
+          .from('participations')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('contest_id', detail.contest.id)
+          .order('score', ascending: false)
+          .order('participated_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+      final participationId = row?['id'] as String?;
+      if (!mounted || participationId == null || participationId.isEmpty) {
+        return;
+      }
+      context.go('/participations/$participationId/result');
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Résultat indisponible pour le moment.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = ref.watch(winnerVictoryDetailProvider(widget.winnerId));
@@ -62,6 +91,7 @@ class _RewardVictoryScreenState extends ConsumerState<RewardVictoryScreen>
             detail: data,
             animation: _controller,
             onBack: _goBackToRewards,
+            onViewResult: () => _openParticipationResult(data),
           ),
           loading: () => const _VictoryLoading(),
           error: (error, stackTrace) => ListView(
@@ -106,11 +136,13 @@ class _VictoryContent extends StatelessWidget {
   final WinnerVictoryDetail detail;
   final Animation<double> animation;
   final VoidCallback onBack;
+  final VoidCallback onViewResult;
 
   const _VictoryContent({
     required this.detail,
     required this.animation,
     required this.onBack,
+    required this.onViewResult,
   });
 
   @override
@@ -131,6 +163,12 @@ class _VictoryContent extends StatelessWidget {
         const SizedBox(height: 14),
         _RewardDetailsCard(reward: detail.reward),
         const SizedBox(height: 18),
+        AppButton(
+          text: 'Voir le résultat de mes réponses',
+          icon: Icons.fact_check_rounded,
+          onPressed: onViewResult,
+        ),
+        const SizedBox(height: 10),
         AppButton(
           text: 'Retour aux récompenses',
           icon: Icons.card_giftcard_rounded,
@@ -248,9 +286,7 @@ class _VictoryHero extends StatelessWidget {
                             ),
                           ),
                           child: Text(
-                            detail.contest.isLiveQuiz
-                                ? 'QUIZ LIVE'
-                                : 'QUIZ',
+                            detail.contest.isLiveQuiz ? 'QUIZ LIVE' : 'QUIZ',
                             style: AppTextStyles.label.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
@@ -685,7 +721,8 @@ class _MiniStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final claimStatus = reward.rewardClaimStatus.toLowerCase();
     final isReady = claimStatus == 'ready';
-    final isAvailable = claimStatus == 'sent' ||
+    final isAvailable =
+        claimStatus == 'sent' ||
         claimStatus == 'claimed' ||
         claimStatus == 'used';
     final isExpired = claimStatus == 'expired' || claimStatus == 'cancelled';

@@ -487,6 +487,12 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   }
 
   void _openMyQuizResult(BuildContext context) {
+    final participationId = data.participationId?.trim() ?? '';
+    if (participationId.isNotEmpty) {
+      context.go('/participations/$participationId/result');
+      return;
+    }
+
     context.go(
       '/contests/${data.contest.id}/quiz/result',
       extra: {
@@ -1788,7 +1794,7 @@ class _DrawParticipationSheetState
     final tickets = _drawTickets(widget.data);
     final confirmationMessage =
         widget.data.drawSettings?.confirmationMessage ??
-        'Les lauréats seront annoncés ${_shortDateTime(widget.data.contest.computedLiveEndsAt)}.';
+        'Les vainqueurs seront annoncés ${_shortDateTime(widget.data.contest.computedLiveEndsAt)}.';
     final winnerDate =
         widget.data.drawSettings?.winnerAnnouncementAt ??
         widget.data.contest.computedLiveEndsAt;
@@ -2973,8 +2979,8 @@ String _winnerText(Contest contest) {
         : '1 récompense';
   }
   return contest.winnersCount > 1
-      ? '${contest.winnersCount} lauréats'
-      : '1 lauréat';
+      ? '${contest.winnersCount} vainqueurs'
+      : '1 vainqueur';
 }
 
 String _liveQuizStatusLabel(Contest contest) {

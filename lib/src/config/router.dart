@@ -23,6 +23,7 @@ import '../features/maintenance/screens/maintenance_screen.dart';
 import '../features/notifications/screens/notifications_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/quiz/models/question.dart';
+import '../features/quiz/screens/participation_result_detail_screen.dart';
 import '../features/quiz/screens/quiz_result_screen.dart';
 import '../features/quiz/screens/quiz_screen.dart';
 import '../features/rewards/screens/rewards_screen.dart';
@@ -75,6 +76,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           location == '/subscriptions' ||
           location == '/notifications' ||
           location == '/contests' ||
+          location.startsWith('/participations/') ||
           location.startsWith('/c/') ||
           location.startsWith('/contests/');
 
@@ -247,6 +249,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/notifications',
             builder: (context, state) => const NotificationsScreen(),
+          ),
+          GoRoute(
+            path: '/participations/:participationId/result',
+            pageBuilder: (context, state) {
+              final participationId =
+                  state.pathParameters['participationId'] ?? '';
+              return _buildMainTabPage(
+                state: state,
+                tabIndex: 4,
+                child: ParticipationResultDetailScreen(
+                  participationId: participationId,
+                ),
+              );
+            },
           ),
           GoRoute(
             path: '/profile',

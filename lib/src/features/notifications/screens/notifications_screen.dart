@@ -288,6 +288,13 @@ void _openNotificationTarget(
   switch (notification.type) {
     case 'winner':
     case 'gain':
+      final winnerId =
+          notification.data['winner_id'] as String? ??
+          notification.data['winnerId'] as String?;
+      if (winnerId != null && winnerId.isNotEmpty) {
+        context.go('/rewards/$winnerId');
+        return;
+      }
       context.go('/rewards');
       return;
     case 'subscription':

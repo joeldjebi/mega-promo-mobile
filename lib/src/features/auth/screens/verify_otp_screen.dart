@@ -7,6 +7,7 @@ import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
@@ -26,19 +27,22 @@ class VerifyOtpScreen extends StatefulWidget {
 
 class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   static const int _otpLength = 6;
-  static const int _resendDuration = 60;
+  static const List<int> _resendDelays = [180, 300, 1800];
+  static final Uri _supportUri = Uri.parse('https://megapromo.app/#contact');
 
   late final List<TextEditingController> _controllers;
   late final List<FocusNode> _focusNodes;
   Timer? _timer;
-  int _secondsRemaining = _resendDuration;
+  int _secondsRemaining = _resendDelays.first;
+  int _resendStepIndex = 0;
   bool _isSubmitting = false;
   bool _isApplyingCode = false;
   bool _isCodeComplete = false;
+  bool _supportRequired = false;
 
   String get _code => _controllers.map((controller) => controller.text).join();
   bool get _isComplete => _code.length == _otpLength;
-  bool get _canResend => _secondsRemaining == 0;
+  bool get _canResend => _secondsRemaining == 0 && !_supportRequired;
   String get _phone => widget.phone.isEmpty ? '+225 XXXXXXXX' : widget.phone;
 
   @override
@@ -67,9 +71,12 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     super.dispose();
   }
 
-  void _startCountdown() {
+  void _startCountdown([int? seconds]) {
     _timer?.cancel();
-    setState(() => _secondsRemaining = _resendDuration);
+    setState(() {
+      _supportRequired = false;
+      _secondsRemaining = seconds ?? _resendDelays[_resendStepIndex];
+    });
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_secondsRemaining <= 1) {
         timer.cancel();
@@ -217,10 +224,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
           'auth',
           'otp_verified',
           'Connexion joueur reussie par OTP.',
-          metadata: {
-            'route': nextRoute,
-            'provider': 'phone',
-          },
+          metadata: {'route': nextRoute, 'provider': 'phone'},
         ),
       );
       unawaited(FcmService.syncTokenForCurrentUser(force: true));
@@ -380,7 +384,16 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         setState(() => _isCodeComplete = false);
       }
       _focusNodes.first.requestFocus();
-      _startCountdown();
+      if (_resendStepIndex >= _resendDelays.length - 1) {
+        _timer?.cancel();
+        setState(() {
+          _secondsRemaining = 0;
+          _supportRequired = true;
+        });
+      } else {
+        _resendStepIndex += 1;
+        _startCountdown();
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -435,6 +448,18 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     }
   }
 
+  Future<void> _openSupport() async {
+    final opened = await launchUrl(
+      _supportUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Service client indisponible.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -459,7 +484,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
               Text('Code de vérification', style: AppTextStyles.h1),
               const SizedBox(height: 10),
               Text(
-                'Un code a été envoyé au $_phone',
+                'Un code OTP a été envoyé via WhatsApp au $_phone',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 34),
@@ -487,13 +512,19 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
               ),
               const SizedBox(height: 22),
               TextButton(
-                onPressed: _canResend ? _resendCode : null,
+                onPressed: _supportRequired
+                    ? _openSupport
+                    : _canResend
+                    ? _resendCode
+                    : null,
                 child: Text(
-                  _canResend
+                  _supportRequired
+                      ? 'Contacter le service client'
+                      : _canResend
                       ? 'Renvoyer le code'
-                      : 'Renvoyer le code dans ${_secondsRemaining}s',
+                      : 'Renvoyer le code dans ${_formatRemainingTime(_secondsRemaining)}',
                   style: AppTextStyles.button.copyWith(
-                    color: _canResend
+                    color: _canResend || _supportRequired
                         ? AppColors.primaryLight
                         : AppColors.textHint,
                   ),
@@ -575,4 +606,13 @@ class _OtpDigitField extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatRemainingTime(int seconds) {
+  if (seconds <= 0) return '0s';
+  final minutes = seconds ~/ 60;
+  final remainingSeconds = seconds % 60;
+  if (minutes <= 0) return '${remainingSeconds}s';
+  if (remainingSeconds == 0) return '${minutes}min';
+  return '${minutes}min ${remainingSeconds}s';
 }

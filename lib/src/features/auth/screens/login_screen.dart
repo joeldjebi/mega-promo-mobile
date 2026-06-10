@@ -155,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Connecte-toi avec ton numéro',
+                'Connecte-toi avec ton numéro WhatsApp',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 34),
@@ -210,6 +210,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
               const SizedBox(height: 24),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.chat_rounded,
+                    color: AppColors.accentGreen,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tu recevras ton code OTP par WhatsApp sur ce numéro.',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
               AppButton(
                 text: 'Continuer',
                 isLoading: _isLoading,
