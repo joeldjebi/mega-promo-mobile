@@ -157,6 +157,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           const Positioned.fill(child: ColoredBox(color: _homeBackgroundColor)),
           Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: topBackgroundHeight + 24,
+            child: const IgnorePointer(child: _HomePromoBackdrop()),
+          ),
+          Positioned(
             top: contentBackgroundTop,
             left: 0,
             right: 0,
@@ -252,11 +259,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           (contest) => contest.isBoosted && !contest.isLive,
                         ),
                         shuffleSeed,
-                      ).take(5).toList();
+                      ).toList();
                       final allContests = shuffleContestsForSession(
                         filtered.where((contest) => !contest.isLive),
                         shuffleSeed,
                       );
+                      final playNowContest =
+                          highlightedLiveQuiz ??
+                          (boosted.isNotEmpty
+                              ? boosted.first
+                              : allContests.isNotEmpty
+                              ? allContests.first
+                              : null);
+                      final visibleBoosted = boosted
+                          .where((contest) => contest.id != playNowContest?.id)
+                          .take(5)
+                          .toList(growable: false);
+                      final visibleAllContests = allContests
+                          .where((contest) => contest.id != playNowContest?.id)
+                          .toList(growable: false);
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,24 +292,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                             const SizedBox(height: 16),
                           ],
-                          if (highlightedLiveQuiz != null) ...[
-                            Text(
-                              'LIVE',
-                              style: AppTextStyles.label.copyWith(
-                                color: _homeOnBackgroundColor,
-                              ),
-                            ),
+                          if (playNowContest != null) ...[
+                            const _HomeSectionLabel('À JOUER MAINTENANT'),
                             const SizedBox(height: 10),
-                            _LiveQuizCard(
-                              contest: highlightedLiveQuiz,
-                              hasParticipated: participatedContestIds.contains(
-                                highlightedLiveQuiz.id,
-                              ),
-                              isRegistered: registeredLiveQuizIds.contains(
-                                highlightedLiveQuiz.id,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
+                            playNowContest.isLive
+                                ? _LiveQuizCard(
+                                    contest: playNowContest,
+                                    hasParticipated: participatedContestIds
+                                        .contains(playNowContest.id),
+                                    isRegistered: registeredLiveQuizIds
+                                        .contains(playNowContest.id),
+                                  )
+                                : _PlayNowContestCard(
+                                    contest: playNowContest,
+                                    hasParticipated: participatedContestIds
+                                        .contains(playNowContest.id),
+                                  ),
+                            const SizedBox(height: 16),
                           ],
                           infoMessages.maybeWhen(
                             data: (messages) => messages.isEmpty
@@ -301,7 +321,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   ),
                             orElse: () => const SizedBox.shrink(),
                           ),
-                          if (boosted.isNotEmpty) ...[
+                          if (visibleBoosted.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             const _HomeSectionLabel('BOOSTÉS'),
                             const SizedBox(height: 10),
@@ -313,7 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 final featuredHeight =
                                     216.0 +
                                     (math.max(0.0, textScale - 1) * 132.0);
-                                final itemWidth = boosted.length == 1
+                                final itemWidth = visibleBoosted.length == 1
                                     ? constraints.maxWidth
                                     : math.min(304.0, constraints.maxWidth);
                                 return SizedBox(
@@ -321,15 +341,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   child: ListView.separated(
                                     scrollDirection: Axis.horizontal,
                                     clipBehavior: Clip.none,
-                                    itemCount: boosted.length,
+                                    itemCount: visibleBoosted.length,
                                     separatorBuilder: (_, _) =>
                                         const SizedBox(width: 12),
                                     itemBuilder: (context, index) {
                                       return _FeaturedContestCard(
                                         width: itemWidth,
-                                        contest: boosted[index],
+                                        contest: visibleBoosted[index],
                                         hasParticipated: participatedContestIds
-                                            .contains(boosted[index].id),
+                                            .contains(visibleBoosted[index].id),
                                       );
                                     },
                                   ),
@@ -340,7 +360,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ],
                           const _HomeSectionLabel('CONCOURS'),
                           const SizedBox(height: 10),
-                          ...allContests
+                          ...visibleAllContests
                               .take(10)
                               .map(
                                 (contest) => Padding(
@@ -352,7 +372,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   ),
                                 ),
                               ),
-                          if (allContests.length > 10) ...[
+                          if (visibleAllContests.length > 10) ...[
                             const SizedBox(height: 4),
                             InkWell(
                               onTap: () => context.go('/contests'),
@@ -619,6 +639,290 @@ class _HomeSectionLabel extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomePromoBackdrop extends StatelessWidget {
+  const _HomePromoBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _HomePromoBackdropPainter());
+  }
+}
+
+class _HomePromoBackdropPainter extends CustomPainter {
+  const _HomePromoBackdropPainter();
+
+  static const _labels = [
+    'MEGA PROMO',
+    '-50%',
+    'COUPON',
+    'BON',
+    'CADEAU',
+    '-25%',
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.08),
+            AppColors.goldLight.withValues(alpha: 0.12),
+            Colors.white.withValues(alpha: 0),
+          ],
+          stops: const [0, 0.46, 1],
+        ).createShader(Offset.zero & size),
+    );
+
+    _paintBand(
+      canvas,
+      size,
+      y: size.height * 0.18,
+      angle: -0.20,
+      color: Colors.white,
+      offset: 0,
+    );
+    _paintBand(
+      canvas,
+      size,
+      y: size.height * 0.52,
+      angle: 0.17,
+      color: AppColors.goldLight,
+      offset: 34,
+    );
+    _paintBand(
+      canvas,
+      size,
+      y: size.height * 0.78,
+      angle: -0.62,
+      color: AppColors.accentGreen,
+      offset: -24,
+    );
+  }
+
+  void _paintBand(
+    Canvas canvas,
+    Size size, {
+    required double y,
+    required double angle,
+    required Color color,
+    required double offset,
+  }) {
+    final longWidth = math.max(size.width, size.height) * 2.1;
+    canvas.save();
+    canvas.translate(size.width / 2, y);
+    canvas.rotate(angle);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: longWidth, height: 34),
+        const Radius.circular(999),
+      ),
+      Paint()..color = color.withValues(alpha: 0.055),
+    );
+
+    var cursor = -longWidth / 2 + offset;
+    var index = 0;
+    while (cursor < longWidth / 2 + 120) {
+      final label = _labels[index % _labels.length];
+      final painter = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: color.withValues(alpha: label == 'MEGA PROMO' ? 0.16 : 0.12),
+            fontSize: label == 'MEGA PROMO' ? 17 : 14,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      painter.paint(canvas, Offset(cursor, -painter.height / 2));
+      cursor += painter.width + 32;
+      index += 1;
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _PlayNowContestCard extends StatelessWidget {
+  final Contest contest;
+  final bool hasParticipated;
+
+  const _PlayNowContestCard({
+    required this.contest,
+    required this.hasParticipated,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final categoryColor = contest.categoryData?.color ?? contest.type.color;
+    final logoUrl = contest.brandLogoUrl;
+
+    return InkWell(
+      onTap: () => context.push('/contests/${contest.id}'),
+      borderRadius: BorderRadius.circular(26),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF17113F),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(
+            color: categoryColor.withValues(alpha: 0.46),
+            width: 1.4,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primaryDark.withValues(alpha: 0.22),
+              blurRadius: 24,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -36,
+              top: -30,
+              child: Icon(
+                Icons.local_offer_rounded,
+                color: Colors.white.withValues(alpha: 0.10),
+                size: 132,
+              ),
+            ),
+            Positioned(
+              left: -28,
+              bottom: -32,
+              child: Container(
+                width: 112,
+                height: 112,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: categoryColor.withValues(alpha: 0.18),
+                    width: 18,
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _CategoryBadge(label: _contestCategoryLabel(contest)),
+                      const Spacer(),
+                      if (hasParticipated)
+                        const _ParticipatedBadge(compact: true)
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.20),
+                            ),
+                          ),
+                          child: ContestDeadlineLabel(
+                            endsAt: contest.endsAt,
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 15),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (logoUrl?.isNotEmpty == true)
+                        _BrandLogo(url: logoUrl!, size: 58)
+                      else
+                        _HomeContestIcon(contest: contest, size: 58),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              contest.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.h2.copyWith(
+                                color: Colors.white,
+                                fontSize: 19,
+                                height: 1.08,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 7,
+                              runSpacing: 7,
+                              children: [
+                                _LiveQuizMetaChip(
+                                  icon: Icons.workspace_premium_rounded,
+                                  label: _winnerText(contest),
+                                  muted: false,
+                                  inverted: true,
+                                ),
+                                _LiveQuizMetaChip(
+                                  icon: Icons.confirmation_number_rounded,
+                                  label: _formatPrize(contest.prizeValue),
+                                  muted: false,
+                                  inverted: true,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: hasParticipated
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      hasParticipated ? 'Voir mes résultats' : 'Jouer',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.button.copyWith(
+                        color: hasParticipated
+                            ? Colors.white
+                            : AppColors.primaryDark,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
