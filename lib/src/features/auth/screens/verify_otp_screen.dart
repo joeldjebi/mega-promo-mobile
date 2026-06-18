@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
@@ -12,20 +13,21 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
 import '../../../services/fcm_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../services/auth_profile_service.dart';
 import '../utils/app_review_auth.dart';
 import '../utils/auth_debug_logger.dart';
 
-class VerifyOtpScreen extends StatefulWidget {
+class VerifyOtpScreen extends ConsumerStatefulWidget {
   final String phone;
 
   const VerifyOtpScreen({super.key, required this.phone});
 
   @override
-  State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
+  ConsumerState<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
 }
 
-class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
+class _VerifyOtpScreenState extends ConsumerState<VerifyOtpScreen> {
   static const int _otpLength = 6;
   static const List<int> _resendDelays = [180, 300, 1800];
   static final Uri _supportUri = Uri.parse('https://megapromo.app/#contact');
@@ -462,6 +464,14 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final flags = ref.watch(appFeatureFlagsProvider).asData?.value;
+    final otpChannel =
+        flags?.otpDeliveryChannel ??
+        AppFeatureFlags.defaults.otpDeliveryChannel;
+    final channelLabel = otpChannel == OtpDeliveryChannel.whatsapp
+        ? 'WhatsApp'
+        : 'SMS';
+
     return Scaffold(
       backgroundColor: AppColors.background,
       resizeToAvoidBottomInset: false,
@@ -484,7 +494,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
               Text('Code de vérification', style: AppTextStyles.h1),
               const SizedBox(height: 10),
               Text(
-                'Un code OTP a été envoyé via WhatsApp au $_phone',
+                'Un code OTP a été envoyé par $channelLabel au $_phone',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 34),

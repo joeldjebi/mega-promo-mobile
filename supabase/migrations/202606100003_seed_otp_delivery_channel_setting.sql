@@ -67,5 +67,7 @@ create index if not exists auth_otp_delivery_attempts_phone_created_idx
 
 grant select on public.app_feature_flags to authenticated, anon;
 grant insert, update on public.app_feature_flags to authenticated;
+grant select on public.app_feature_flags to service_role;
+grant select, insert, update on public.auth_otp_delivery_attempts to service_role;
 
 notify pgrst, 'reload schema';

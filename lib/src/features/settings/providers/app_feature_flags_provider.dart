@@ -3,12 +3,25 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../config/app_store_review_mode.dart';
 
+enum OtpDeliveryChannel {
+  sms,
+  whatsapp;
+
+  static OtpDeliveryChannel fromValue(Object? value) {
+    final normalized = value?.toString().trim().toLowerCase();
+    return normalized == 'whatsapp'
+        ? OtpDeliveryChannel.whatsapp
+        : OtpDeliveryChannel.sms;
+  }
+}
+
 class AppFeatureFlags {
   final bool playerSubscriptionsEnabled;
   final bool appMaintenanceEnabled;
   final bool playerProfileCoordinatesEnabled;
   final bool playerProfileRewardsEnabled;
   final bool appReviewSafeEnabled;
+  final OtpDeliveryChannel otpDeliveryChannel;
 
   const AppFeatureFlags({
     required this.playerSubscriptionsEnabled,
@@ -16,6 +29,7 @@ class AppFeatureFlags {
     required this.playerProfileCoordinatesEnabled,
     required this.playerProfileRewardsEnabled,
     required this.appReviewSafeEnabled,
+    required this.otpDeliveryChannel,
   });
 
   static const defaults = AppFeatureFlags(
@@ -24,6 +38,7 @@ class AppFeatureFlags {
     playerProfileCoordinatesEnabled: true,
     playerProfileRewardsEnabled: true,
     appReviewSafeEnabled: false,
+    otpDeliveryChannel: OtpDeliveryChannel.sms,
   );
 
   AppFeatureFlags copyWith({
@@ -32,6 +47,7 @@ class AppFeatureFlags {
     bool? playerProfileCoordinatesEnabled,
     bool? playerProfileRewardsEnabled,
     bool? appReviewSafeEnabled,
+    OtpDeliveryChannel? otpDeliveryChannel,
   }) {
     return AppFeatureFlags(
       playerSubscriptionsEnabled:
@@ -44,6 +60,7 @@ class AppFeatureFlags {
       playerProfileRewardsEnabled:
           playerProfileRewardsEnabled ?? this.playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled ?? this.appReviewSafeEnabled,
+      otpDeliveryChannel: otpDeliveryChannel ?? this.otpDeliveryChannel,
     );
   }
 
@@ -59,6 +76,7 @@ class AppFeatureFlags {
     var playerProfileCoordinatesEnabled = true;
     var playerProfileRewardsEnabled = true;
     var appReviewSafeEnabled = false;
+    var otpDeliveryChannel = OtpDeliveryChannel.sms;
 
     for (final row in rows) {
       if (row is! Map<String, dynamic>) continue;
@@ -74,6 +92,13 @@ class AppFeatureFlags {
         playerProfileRewardsEnabled = isEnabled;
       } else if (key == 'app_review_safe') {
         appReviewSafeEnabled = isEnabled;
+      } else if (key == 'otp_delivery_channel' && isEnabled) {
+        final metadata = row['metadata'];
+        if (metadata is Map) {
+          otpDeliveryChannel = OtpDeliveryChannel.fromValue(
+            metadata['channel'],
+          );
+        }
       }
     }
 
@@ -83,6 +108,7 @@ class AppFeatureFlags {
       playerProfileCoordinatesEnabled: playerProfileCoordinatesEnabled,
       playerProfileRewardsEnabled: playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled,
+      otpDeliveryChannel: otpDeliveryChannel,
     ).appStoreSafe();
   }
 }
@@ -94,13 +120,14 @@ final appFeatureFlagsProvider = StreamProvider.autoDispose<AppFeatureFlags>((
     final supabase = Supabase.instance.client;
     final rows = await supabase
         .from('app_feature_flags')
-        .select('key, is_enabled')
+        .select('key, is_enabled, metadata')
         .inFilter('key', [
           'player_subscriptions',
           'app_maintenance',
           'player_profile_coordinates',
           'player_profile_rewards',
           'app_review_safe',
+          'otp_delivery_channel',
         ]);
 
     yield AppFeatureFlags.fromRows(rows);

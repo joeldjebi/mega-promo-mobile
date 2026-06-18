@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
@@ -8,17 +9,18 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
+import '../../settings/providers/app_feature_flags_provider.dart';
 import '../utils/app_review_auth.dart';
 import '../utils/auth_debug_logger.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   static const _phoneDigitsLength = 10;
 
   final TextEditingController _phoneController = TextEditingController();
@@ -113,6 +115,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final flags = ref.watch(appFeatureFlagsProvider).asData?.value;
+    final otpChannel =
+        flags?.otpDeliveryChannel ??
+        AppFeatureFlags.defaults.otpDeliveryChannel;
+    final usesWhatsapp = otpChannel == OtpDeliveryChannel.whatsapp;
+    final channelLabel = usesWhatsapp ? 'WhatsApp' : 'SMS';
+    final channelIcon = usesWhatsapp ? Icons.chat_rounded : Icons.sms_rounded;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -155,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Connecte-toi avec ton numéro WhatsApp',
+                'Connecte-toi avec ton numéro de téléphone',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: 34),
@@ -213,15 +223,11 @@ class _LoginScreenState extends State<LoginScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.chat_rounded,
-                    color: AppColors.accentGreen,
-                    size: 18,
-                  ),
+                  Icon(channelIcon, color: AppColors.accentGreen, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Tu recevras ton code OTP par WhatsApp sur ce numéro.',
+                      'Tu recevras ton code OTP par $channelLabel sur ce numéro.',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,
                         height: 1.35,
