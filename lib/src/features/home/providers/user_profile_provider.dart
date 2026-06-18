@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/providers/auth_provider.dart';
+import '../../auth/services/auth_profile_service.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../../../services/network_status_service.dart';
 
@@ -90,13 +91,13 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
   }
 
   authLogPayload('userProfileFetch', {'id': resolvedUserId});
-  final profileFuture = supabase
+  final profileQuery = supabase
       .from('users')
       .select(
         'id, phone, username, avatar_url, is_premium, points_total, participations_today, last_participation_date',
       )
       .eq('id', resolvedUserId)
-      .single();
+      .maybeSingle();
 
   authLogPayload('userActiveSubscriptionFetch', {'userId': resolvedUserId});
   final subscriptionFuture = supabase
@@ -111,9 +112,28 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
       .limit(1)
       .maybeSingle();
 
-  Map<String, dynamic> data;
+  Map<String, dynamic>? data;
   try {
-    data = await profileFuture;
+    data = await profileQuery;
+    if (data == null) {
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) {
+        throw StateError('Utilisateur non connecté.');
+      }
+      authLogPayload('userProfileRepair', {'id': resolvedUserId});
+      await ensureUserProfileAndResolveRoute(currentUser);
+      data = await supabase
+          .from('users')
+          .select(
+            'id, phone, username, avatar_url, is_premium, points_total, participations_today, last_participation_date',
+          )
+          .eq('id', resolvedUserId)
+          .maybeSingle();
+      authLogResponse('userProfileRepair', data);
+    }
+    if (data == null) {
+      throw StateError('Profil joueur introuvable.');
+    }
   } catch (error) {
     NetworkStatusService.instance.markOfflineFromError(error);
     rethrow;

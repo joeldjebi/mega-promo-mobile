@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
+import 'package:mega_promo/src/shared/widgets/promo_watermark_background.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/app_onboarding_service.dart';
@@ -22,28 +22,19 @@ class _AppIntroOnboardingScreenState extends State<AppIntroOnboardingScreen> {
 
   static const _steps = [
     _IntroStep(
-      asset: 'assets/onboarding/discover_brands.svg',
-      icon: Icons.storefront_rounded,
-      visualLabel: 'Marques',
-      visualDetail: 'Produits & offres',
+      visualType: _IntroVisualType.brands,
       title: 'Découvre des marques',
       body:
           'Explore des campagnes promotionnelles et découvre les produits des entreprises partenaires.',
     ),
     _IntroStep(
-      asset: 'assets/onboarding/play_quiz.svg',
-      icon: Icons.quiz_rounded,
-      visualLabel: 'Quiz gratuit',
-      visualDetail: 'Question / réponse',
+      visualType: _IntroVisualType.quiz,
       title: 'Réponds aux quiz',
       body:
           'Participe gratuitement à des quiz simples pour mieux connaître les marques et leurs offres.',
     ),
     _IntroStep(
-      asset: 'assets/onboarding/earn_rewards.svg',
-      icon: Icons.card_giftcard_rounded,
-      visualLabel: 'Récompenses',
-      visualDetail: 'Bons & cadeaux',
+      visualType: _IntroVisualType.rewards,
       title: 'Profite des récompenses',
       body:
           'Reçois des récompenses promotionnelles offertes par les partenaires, sans mise ni achat obligatoire.',
@@ -92,94 +83,103 @@ class _AppIntroOnboardingScreenState extends State<AppIntroOnboardingScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 18, 24, 22),
-          child: Column(
-            children: [
-              Row(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const PromoWatermarkBackground(colorful: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 22),
+              child: Column(
                 children: [
-                  Container(
-                    width: 54,
-                    height: 54,
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.22),
-                          blurRadius: 18,
-                          offset: const Offset(0, 9),
+                  Row(
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        padding: const EdgeInsets.all(9),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.22),
+                              blurRadius: 18,
+                              offset: const Offset(0, 9),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Image.asset(
-                      'assets/logo/megapromologo.png',
-                      fit: BoxFit.contain,
+                        child: Image.asset(
+                          'assets/logo/megapromologo.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: _isClosing ? null : _finish,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.textSecondary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 10,
+                          ),
+                          backgroundColor: Colors.white.withValues(alpha: 0.82),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(999),
+                            side: const BorderSide(
+                              color: AppColors.surfaceBorder,
+                            ),
+                          ),
+                        ),
+                        child: Text(
+                          'Passer',
+                          style: AppTextStyles.bodySecondary.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _controller,
+                      itemCount: _steps.length,
+                      onPageChanged: (value) => setState(() => _index = value),
+                      itemBuilder: (context, index) {
+                        final step = _steps[index];
+                        return _IntroStepView(step: step);
+                      },
                     ),
                   ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: _isClosing ? null : _finish,
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.textSecondary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 10,
+                  Row(
+                    children: [
+                      _IntroDots(index: _index, count: _steps.length),
+                      const Spacer(),
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 180),
+                        opacity: canGoBack ? 1 : 0,
+                        child: _CircleNavButton(
+                          icon: Icons.arrow_back_rounded,
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.textPrimary,
+                          onTap: canGoBack ? _previous : null,
+                        ),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(999),
-                        side: const BorderSide(color: AppColors.surfaceBorder),
+                      const SizedBox(width: 14),
+                      _CircleNavButton(
+                        icon: isLast
+                            ? Icons.check_rounded
+                            : Icons.arrow_forward_rounded,
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        showRing: true,
+                        onTap: _isClosing ? null : _next,
                       ),
-                    ),
-                    child: Text(
-                      'Passer',
-                      style: AppTextStyles.bodySecondary.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
-              Expanded(
-                child: PageView.builder(
-                  controller: _controller,
-                  itemCount: _steps.length,
-                  onPageChanged: (value) => setState(() => _index = value),
-                  itemBuilder: (context, index) {
-                    final step = _steps[index];
-                    return _IntroStepView(step: step);
-                  },
-                ),
-              ),
-              Row(
-                children: [
-                  _IntroDots(index: _index, count: _steps.length),
-                  const Spacer(),
-                  AnimatedOpacity(
-                    duration: const Duration(milliseconds: 180),
-                    opacity: canGoBack ? 1 : 0,
-                    child: _CircleNavButton(
-                      icon: Icons.arrow_back_rounded,
-                      backgroundColor: AppColors.surface,
-                      foregroundColor: AppColors.textPrimary,
-                      onTap: canGoBack ? _previous : null,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  _CircleNavButton(
-                    icon: isLast
-                        ? Icons.check_rounded
-                        : Icons.arrow_forward_rounded,
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    showRing: true,
-                    onTap: _isClosing ? null : _next,
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -202,48 +202,7 @@ class _IntroStepView extends StatelessWidget {
           children: [
             SizedBox(
               height: visualHeight,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(34),
-                        border: Border.all(
-                          color: AppColors.primary.withValues(alpha: 0.10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: SvgPicture.asset(
-                        step.asset,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 18,
-                    top: 18,
-                    child: _VisualBadge(
-                      icon: step.icon,
-                      label: step.visualLabel,
-                      isPrimary: true,
-                    ),
-                  ),
-                  Positioned(
-                    right: 18,
-                    bottom: 18,
-                    child: _VisualBadge(
-                      icon: Icons.verified_rounded,
-                      label: step.visualDetail,
-                    ),
-                  ),
-                ],
-              ),
+              child: _IntroVisualScene(type: step.visualType),
             ),
             const Spacer(),
             Text(
@@ -298,55 +257,498 @@ class _IntroDots extends StatelessWidget {
   }
 }
 
-class _VisualBadge extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isPrimary;
+class _IntroVisualScene extends StatelessWidget {
+  final _IntroVisualType type;
 
-  const _VisualBadge({
-    required this.icon,
+  const _IntroVisualScene({required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: CustomPaint(painter: _IntroGlowPainter(type)),
+            ),
+            switch (type) {
+              _IntroVisualType.brands => _BrandsVisual(
+                width: width,
+                height: height,
+              ),
+              _IntroVisualType.quiz => _QuizVisual(
+                width: width,
+                height: height,
+              ),
+              _IntroVisualType.rewards => _RewardsVisual(
+                width: width,
+                height: height,
+              ),
+            },
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BrandsVisual extends StatelessWidget {
+  final double width;
+  final double height;
+
+  const _BrandsVisual({required this.width, required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: width * 0.05,
+          top: height * 0.05,
+          child: const _BrandWordmark(
+            label: 'Sublime\nCôte d’Ivoire',
+            color: Color(0xFFFF7A1A),
+            icon: Icons.wb_sunny_rounded,
+            large: true,
+          ),
+        ),
+        Positioned(
+          right: width * 0.06,
+          top: height * 0.12,
+          child: const _BrandWordmark(
+            label: 'Orange',
+            color: Color(0xFFFF7900),
+            icon: Icons.signal_cellular_alt_rounded,
+          ),
+        ),
+        Positioned(
+          left: width * 0.10,
+          top: height * 0.46,
+          child: const _BrandWordmark(
+            label: 'Wave',
+            color: Color(0xFF20A7F3),
+            icon: Icons.wallet_rounded,
+          ),
+        ),
+        Positioned(
+          right: width * 0.14,
+          top: height * 0.46,
+          child: const _BrandWordmark(
+            label: 'Air Côte\nd’Ivoire',
+            color: Color(0xFF009FE3),
+            icon: Icons.flight_takeoff_rounded,
+          ),
+        ),
+        Positioned(
+          left: width * 0.02,
+          bottom: height * 0.08,
+          child: const _BrandWordmark(
+            label: 'Moov Africa',
+            color: Color(0xFF00A651),
+            icon: Icons.public_rounded,
+          ),
+        ),
+        Positioned(
+          right: width * 0.02,
+          bottom: height * 0.08,
+          child: const _BrandWordmark(
+            label: 'SIB',
+            color: Color(0xFF6A5BE2),
+            icon: Icons.account_balance_rounded,
+          ),
+        ),
+        Positioned(
+          left: width * 0.42,
+          bottom: height * 0.22,
+          child: const _BrandWordmark(
+            label: 'Solibra',
+            color: Color(0xFFE11D48),
+            icon: Icons.local_drink_rounded,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuizVisual extends StatelessWidget {
+  final double width;
+  final double height;
+
+  const _QuizVisual({required this.width, required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          left: width * 0.18,
+          top: height * 0.06,
+          child: const _QuizBubble(
+            label: '?',
+            color: AppColors.primary,
+            size: 90,
+            icon: Icons.quiz_rounded,
+          ),
+        ),
+        Positioned(
+          right: width * 0.12,
+          top: height * 0.18,
+          child: const _QuizBubble(
+            label: '10 pts',
+            color: AppColors.accentGreen,
+            size: 76,
+            icon: Icons.bolt_rounded,
+          ),
+        ),
+        Positioned(
+          left: width * 0.06,
+          top: height * 0.48,
+          child: const _AnswerPill(label: 'A', color: AppColors.primary),
+        ),
+        Positioned(
+          left: width * 0.33,
+          top: height * 0.55,
+          child: const _AnswerPill(label: 'B', color: Color(0xFFF97316)),
+        ),
+        Positioned(
+          right: width * 0.10,
+          top: height * 0.50,
+          child: const _AnswerPill(label: 'C', color: AppColors.accentGreen),
+        ),
+        Positioned(
+          left: width * 0.22,
+          bottom: height * 0.08,
+          child: const _QuizTimer(),
+        ),
+      ],
+    );
+  }
+}
+
+class _RewardsVisual extends StatelessWidget {
+  final double width;
+  final double height;
+
+  const _RewardsVisual({required this.width, required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          left: width * 0.08,
+          top: height * 0.06,
+          child: const _RewardToken(
+            label: 'CASH',
+            icon: Icons.payments_rounded,
+            color: AppColors.accentGreen,
+            large: true,
+          ),
+        ),
+        Positioned(
+          right: width * 0.08,
+          top: height * 0.12,
+          child: const _RewardToken(
+            label: 'Cadeau',
+            icon: Icons.card_giftcard_rounded,
+            color: AppColors.primary,
+          ),
+        ),
+        Positioned(
+          left: width * 0.16,
+          top: height * 0.48,
+          child: const _RewardToken(
+            label: 'Bonus',
+            icon: Icons.stars_rounded,
+            color: AppColors.gold,
+          ),
+        ),
+        Positioned(
+          right: width * 0.12,
+          top: height * 0.48,
+          child: const _RewardToken(
+            label: 'Concert',
+            icon: Icons.confirmation_number_rounded,
+            color: Color(0xFFF472B6),
+          ),
+        ),
+        Positioned(
+          left: width * 0.38,
+          bottom: height * 0.07,
+          child: const _RewardToken(
+            label: '-50%',
+            icon: Icons.local_offer_rounded,
+            color: Color(0xFFF97316),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrandWordmark extends StatelessWidget {
+  final String label;
+  final Color color;
+  final IconData icon;
+  final bool large;
+
+  const _BrandWordmark({
     required this.label,
-    this.isPrimary = false,
+    required this.color,
+    required this.icon,
+    this.large = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final background = isPrimary ? AppColors.primary : Colors.white;
-    final foreground = isPrimary ? Colors.white : AppColors.primary;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isPrimary
-              ? Colors.white.withValues(alpha: 0.18)
-              : AppColors.primary.withValues(alpha: 0.14),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+    final diameter = large ? 132.0 : 82.0;
+    return Transform.rotate(
+      angle: large ? -0.08 : 0.08,
+      child: Container(
+        width: diameter,
+        height: diameter,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color.withValues(alpha: large ? 0.18 : 0.13),
+          border: Border.all(
+            color: color.withValues(alpha: large ? 0.30 : 0.22),
           ),
-        ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: large ? 28 : 21),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: large ? 2 : 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: color,
+                  fontSize: large ? 15 : 12,
+                  fontWeight: FontWeight.w900,
+                  height: 1.02,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    );
+  }
+}
+
+class _QuizBubble extends StatelessWidget {
+  final String label;
+  final Color color;
+  final double size;
+  final IconData icon;
+
+  const _QuizBubble({
+    required this.label,
+    required this.color,
+    required this.size,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withValues(alpha: 0.16),
+        border: Border.all(color: color.withValues(alpha: 0.32), width: 1.4),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: foreground, size: 17),
-          const SizedBox(width: 7),
+          Icon(icon, color: color, size: size * 0.28),
+          const SizedBox(height: 4),
           Text(
             label,
-            style: AppTextStyles.bodySmall.copyWith(
-              color: foreground,
+            style: AppTextStyles.h2.copyWith(
+              color: color,
+              fontSize: size * 0.22,
               fontWeight: FontWeight.w900,
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+class _AnswerPill extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _AnswerPill({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 82,
+      height: 48,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.h2.copyWith(
+          color: color,
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _QuizTimer extends StatelessWidget {
+  const _QuizTimer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.timer_rounded, color: AppColors.primary, size: 22),
+        const SizedBox(width: 8),
+        Text(
+          '00:20',
+          style: AppTextStyles.h2.copyWith(
+            color: AppColors.primary,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RewardToken extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool large;
+
+  const _RewardToken({
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.large = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final size = large ? 118.0 : 90.0;
+    return Transform.rotate(
+      angle: large ? -0.12 : 0.10,
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(large ? 32 : 26),
+          color: color.withValues(alpha: large ? 0.18 : 0.14),
+          border: Border.all(color: color.withValues(alpha: 0.30)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: large ? 34 : 27),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: color,
+                fontWeight: FontWeight.w900,
+                fontSize: large ? 15 : 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IntroGlowPainter extends CustomPainter {
+  final _IntroVisualType type;
+
+  const _IntroGlowPainter(this.type);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final colors = switch (type) {
+      _IntroVisualType.brands => [
+        const Color(0xFFFF7900),
+        AppColors.primary,
+        AppColors.accentGreen,
+      ],
+      _IntroVisualType.quiz => [
+        AppColors.primary,
+        const Color(0xFFF97316),
+        AppColors.accentGreen,
+      ],
+      _IntroVisualType.rewards => [
+        AppColors.accentGreen,
+        AppColors.goldLight,
+        const Color(0xFFF472B6),
+      ],
+    };
+
+    final circles = [
+      (
+        Offset(size.width * 0.25, size.height * 0.25),
+        size.width * 0.34,
+        colors[0],
+      ),
+      (
+        Offset(size.width * 0.76, size.height * 0.32),
+        size.width * 0.30,
+        colors[1],
+      ),
+      (
+        Offset(size.width * 0.50, size.height * 0.74),
+        size.width * 0.36,
+        colors[2],
+      ),
+    ];
+
+    for (final circle in circles) {
+      canvas.drawCircle(
+        circle.$1,
+        circle.$2,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              circle.$3.withValues(alpha: 0.18),
+              circle.$3.withValues(alpha: 0),
+            ],
+          ).createShader(Rect.fromCircle(center: circle.$1, radius: circle.$2)),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _IntroGlowPainter oldDelegate) {
+    return oldDelegate.type != type;
   }
 }
 
@@ -398,19 +800,15 @@ class _CircleNavButton extends StatelessWidget {
 }
 
 class _IntroStep {
-  final String asset;
-  final IconData icon;
-  final String visualLabel;
-  final String visualDetail;
+  final _IntroVisualType visualType;
   final String title;
   final String body;
 
   const _IntroStep({
-    required this.asset,
-    required this.icon,
-    required this.visualLabel,
-    required this.visualDetail,
+    required this.visualType,
     required this.title,
     required this.body,
   });
 }
+
+enum _IntroVisualType { brands, quiz, rewards }

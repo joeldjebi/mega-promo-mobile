@@ -15,6 +15,32 @@ enum OtpDeliveryChannel {
   }
 }
 
+enum PlayerAuthMode {
+  otp,
+  social,
+  hybrid;
+
+  static PlayerAuthMode fromValue(Object? value) {
+    final normalized = value?.toString().trim().toLowerCase();
+    if (normalized == 'social' ||
+        normalized == 'google_apple' ||
+        normalized == 'google_apple_only') {
+      return PlayerAuthMode.social;
+    }
+    if (normalized == 'hybrid' ||
+        normalized == 'social_otp' ||
+        normalized == 'google_apple_otp') {
+      return PlayerAuthMode.hybrid;
+    }
+    return PlayerAuthMode.otp;
+  }
+
+  bool get allowsOtp =>
+      this == PlayerAuthMode.otp || this == PlayerAuthMode.hybrid;
+  bool get allowsSocial =>
+      this == PlayerAuthMode.social || this == PlayerAuthMode.hybrid;
+}
+
 class AppFeatureFlags {
   final bool playerSubscriptionsEnabled;
   final bool appMaintenanceEnabled;
@@ -22,6 +48,7 @@ class AppFeatureFlags {
   final bool playerProfileRewardsEnabled;
   final bool appReviewSafeEnabled;
   final OtpDeliveryChannel otpDeliveryChannel;
+  final PlayerAuthMode playerAuthMode;
 
   const AppFeatureFlags({
     required this.playerSubscriptionsEnabled,
@@ -30,6 +57,7 @@ class AppFeatureFlags {
     required this.playerProfileRewardsEnabled,
     required this.appReviewSafeEnabled,
     required this.otpDeliveryChannel,
+    required this.playerAuthMode,
   });
 
   static const defaults = AppFeatureFlags(
@@ -39,6 +67,7 @@ class AppFeatureFlags {
     playerProfileRewardsEnabled: true,
     appReviewSafeEnabled: false,
     otpDeliveryChannel: OtpDeliveryChannel.sms,
+    playerAuthMode: PlayerAuthMode.otp,
   );
 
   AppFeatureFlags copyWith({
@@ -48,6 +77,7 @@ class AppFeatureFlags {
     bool? playerProfileRewardsEnabled,
     bool? appReviewSafeEnabled,
     OtpDeliveryChannel? otpDeliveryChannel,
+    PlayerAuthMode? playerAuthMode,
   }) {
     return AppFeatureFlags(
       playerSubscriptionsEnabled:
@@ -61,6 +91,7 @@ class AppFeatureFlags {
           playerProfileRewardsEnabled ?? this.playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled ?? this.appReviewSafeEnabled,
       otpDeliveryChannel: otpDeliveryChannel ?? this.otpDeliveryChannel,
+      playerAuthMode: playerAuthMode ?? this.playerAuthMode,
     );
   }
 
@@ -77,6 +108,7 @@ class AppFeatureFlags {
     var playerProfileRewardsEnabled = true;
     var appReviewSafeEnabled = false;
     var otpDeliveryChannel = OtpDeliveryChannel.sms;
+    var playerAuthMode = PlayerAuthMode.otp;
 
     for (final row in rows) {
       if (row is! Map<String, dynamic>) continue;
@@ -99,6 +131,11 @@ class AppFeatureFlags {
             metadata['channel'],
           );
         }
+      } else if (key == 'player_auth_mode' && isEnabled) {
+        final metadata = row['metadata'];
+        if (metadata is Map) {
+          playerAuthMode = PlayerAuthMode.fromValue(metadata['mode']);
+        }
       }
     }
 
@@ -109,6 +146,7 @@ class AppFeatureFlags {
       playerProfileRewardsEnabled: playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled,
       otpDeliveryChannel: otpDeliveryChannel,
+      playerAuthMode: playerAuthMode,
     ).appStoreSafe();
   }
 }
@@ -128,6 +166,7 @@ final appFeatureFlagsProvider = StreamProvider.autoDispose<AppFeatureFlags>((
           'player_profile_rewards',
           'app_review_safe',
           'otp_delivery_channel',
+          'player_auth_mode',
         ]);
 
     yield AppFeatureFlags.fromRows(rows);

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mega_promo/core/theme/app_colors.dart';
 import 'package:mega_promo/core/theme/app_text_styles.dart';
 import 'package:mega_promo/core/widgets/app_button.dart';
+import 'package:mega_promo/src/shared/widgets/promo_watermark_background.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../providers/onboarding_provider.dart';
@@ -108,76 +109,87 @@ class _OnboardingUsernameScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const _OnboardingProgress(step: 1),
-              const SizedBox(height: 42),
-              Text('Choisis ton pseudo', style: AppTextStyles.h1),
-              const SizedBox(height: 10),
-              Text(
-                'Il sera visible par tous les joueurs',
-                style: AppTextStyles.bodySecondary,
-              ),
-              const SizedBox(height: 30),
-              TextField(
-                controller: _usernameController,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_]')),
-                  LengthLimitingTextInputFormatter(20),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const PromoWatermarkBackground(colorful: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _OnboardingProgress(step: 1),
+                  const SizedBox(height: 42),
+                  Text('Choisis ton pseudo', style: AppTextStyles.h1),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Il sera visible par tous les joueurs',
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                  const SizedBox(height: 30),
+                  TextField(
+                    controller: _usernameController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[a-zA-Z0-9_]'),
+                      ),
+                      LengthLimitingTextInputFormatter(20),
+                    ],
+                    textInputAction: TextInputAction.done,
+                    style: AppTextStyles.body,
+                    decoration: InputDecoration(
+                      hintText: 'ex: promo_champion',
+                      fillColor: Colors.white.withValues(alpha: 0.92),
+                      suffixIcon: _isChecking
+                          ? const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
+                          : _isAvailable
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: AppColors.accentGreen,
+                            )
+                          : _errorText != null
+                          ? const Icon(
+                              Icons.error_rounded,
+                              color: AppColors.accentRed,
+                            )
+                          : null,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: statusColor),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: statusColor, width: 1.6),
+                      ),
+                    ),
+                    onChanged: _onUsernameChanged,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _isAvailable
+                        ? 'Pseudo disponible'
+                        : _errorText ??
+                              'Lettres, chiffres et underscore uniquement.',
+                    style: AppTextStyles.bodySmall.copyWith(color: statusColor),
+                  ),
+                  const Spacer(),
+                  AppButton(
+                    text: 'Continuer',
+                    onPressed: _isAvailable && !_isChecking ? _continue : null,
+                  ),
                 ],
-                textInputAction: TextInputAction.done,
-                style: AppTextStyles.body,
-                decoration: InputDecoration(
-                  hintText: 'ex: promo_champion',
-                  suffixIcon: _isChecking
-                      ? const Padding(
-                          padding: EdgeInsets.all(14),
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : _isAvailable
-                      ? const Icon(
-                          Icons.check_circle_rounded,
-                          color: AppColors.accentGreen,
-                        )
-                      : _errorText != null
-                      ? const Icon(
-                          Icons.error_rounded,
-                          color: AppColors.accentRed,
-                        )
-                      : null,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: statusColor),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: statusColor, width: 1.6),
-                  ),
-                ),
-                onChanged: _onUsernameChanged,
               ),
-              const SizedBox(height: 10),
-              Text(
-                _isAvailable
-                    ? 'Pseudo disponible'
-                    : _errorText ??
-                          'Lettres, chiffres et underscore uniquement.',
-                style: AppTextStyles.bodySmall.copyWith(color: statusColor),
-              ),
-              const Spacer(),
-              AppButton(
-                text: 'Continuer',
-                onPressed: _isAvailable && !_isChecking ? _continue : null,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -215,7 +227,8 @@ class _OnboardingAvatarScreenState
     try {
       final payload = {
         'id': user.id,
-        'phone': user.phone,
+        if (user.phone != null && user.phone!.trim().isNotEmpty)
+          'phone': user.phone,
         'username': username,
         'avatar_url': avatarUrl,
         'role': 'player',
@@ -253,49 +266,57 @@ class _OnboardingAvatarScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const _OnboardingProgress(step: 2),
-              const SizedBox(height: 34),
-              Text('Choisis ton avatar', style: AppTextStyles.h1),
-              const SizedBox(height: 10),
-              Text(
-                'Sélectionne ton style pour commencer.',
-                style: AppTextStyles.bodySecondary,
-              ),
-              const SizedBox(height: 28),
-              Expanded(
-                child: GridView.builder(
-                  itemCount: _avatarOptions.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    mainAxisSpacing: 16,
-                    crossAxisSpacing: 14,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const PromoWatermarkBackground(colorful: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _OnboardingProgress(step: 2),
+                  const SizedBox(height: 34),
+                  Text('Choisis ton avatar', style: AppTextStyles.h1),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Sélectionne ton style pour commencer.',
+                    style: AppTextStyles.bodySecondary,
                   ),
-                  itemBuilder: (context, index) {
-                    final avatar = _avatarOptions[index];
-                    final isSelected = _selectedAvatar == avatar.id;
+                  const SizedBox(height: 28),
+                  Expanded(
+                    child: GridView.builder(
+                      itemCount: _avatarOptions.length,
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 16,
+                            crossAxisSpacing: 14,
+                          ),
+                      itemBuilder: (context, index) {
+                        final avatar = _avatarOptions[index];
+                        final isSelected = _selectedAvatar == avatar.id;
 
-                    return _AvatarOption(
-                      avatar: avatar,
-                      isSelected: isSelected,
-                      onTap: () => setState(() => _selectedAvatar = avatar.id),
-                    );
-                  },
-                ),
+                        return _AvatarOption(
+                          avatar: avatar,
+                          isSelected: isSelected,
+                          onTap: () =>
+                              setState(() => _selectedAvatar = avatar.id),
+                        );
+                      },
+                    ),
+                  ),
+                  AppButton(
+                    text: 'Commencer',
+                    isLoading: _isSaving,
+                    onPressed: _selectedAvatar != null && !_isSaving
+                        ? _startPlaying
+                        : null,
+                  ),
+                ],
               ),
-              AppButton(
-                text: 'Commencer',
-                isLoading: _isSaving,
-                onPressed: _selectedAvatar != null && !_isSaving
-                    ? _startPlaying
-                    : null,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

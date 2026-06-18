@@ -10,6 +10,7 @@ import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/onboarding_screen.dart';
 import '../features/auth/screens/splash_screen.dart';
 import '../features/auth/screens/verify_otp_screen.dart';
+import '../features/auth/services/auth_profile_service.dart';
 import '../features/account/screens/account_reactivation_screen.dart';
 import '../features/contests/screens/contest_detail_screen.dart';
 import '../features/contests/screens/contests_screen.dart';
@@ -52,6 +53,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     observers: [AppTelemetryNavigatorObserver()],
     refreshListenable: routerRefresh,
     redirect: (context, state) async {
+      final uri = state.uri;
+      final isOAuthCallback =
+          (uri.scheme == 'megapromo' && uri.host == 'login-callback') ||
+          uri.path == '/login-callback';
+      if (isOAuthCallback) {
+        return '/splash';
+      }
+
       final authState = ref.read(authStateProvider);
       if (authState.isLoading && !authState.hasValue) {
         return null;
@@ -59,7 +68,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       final currentUser = authState.asData?.value;
       final isLogged = currentUser != null;
-      final location = state.uri.path;
+      final location = uri.path;
       final goingToLogin = location == '/login';
       final goingToSplash = location == '/splash';
       final goingToMaintenance = location == '/maintenance';
@@ -94,6 +103,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       if (isLogged) {
+        final profileRedirect = await _profileCompletionRedirect(
+          user: currentUser,
+          location: location,
+        );
+        if (profileRedirect != null) return profileRedirect;
+
         final maintenanceRedirect = await _maintenanceRedirect(
           userId: currentUser.id,
           goingToMaintenance: goingToMaintenance,
@@ -132,6 +147,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const AppIntroOnboardingScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/login-callback', redirect: (context, state) => '/splash'),
       GoRoute(
         path: '/maintenance',
         builder: (context, state) => const MaintenanceScreen(),
@@ -323,6 +339,46 @@ Page<void> _buildMainTabPage({
       );
     },
   );
+}
+
+Future<String?> _profileCompletionRedirect({
+  required User user,
+  required String location,
+}) async {
+  if (!NetworkStatusService.instance.canAttemptNetwork) return null;
+
+  try {
+    final resolvedRoute = await ensureUserProfileAndResolveRoute(user);
+    final needsOnboarding = resolvedRoute == '/onboarding';
+    if (needsOnboarding) {
+      return location.startsWith('/onboarding') ? null : '/onboarding';
+    }
+
+    if (resolvedRoute == '/account/reactivation') {
+      return location == '/account/reactivation' ? null : resolvedRoute;
+    }
+
+    if (location.startsWith('/onboarding')) {
+      return resolvedRoute;
+    }
+
+    return null;
+  } catch (error, stackTrace) {
+    NetworkStatusService.instance.markOfflineFromError(error);
+    if (AppTelemetryService.isRetryableNetworkError(error)) {
+      debugPrint('[ROUTER][profileCompletion] network skipped: $error');
+      return null;
+    }
+    debugPrint('[ROUTER][profileCompletion] skipped: $error');
+    unawaited(
+      AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'profile_completion_redirect_failed',
+      ),
+    );
+    return null;
+  }
 }
 
 Future<String?> _maintenanceRedirect({
