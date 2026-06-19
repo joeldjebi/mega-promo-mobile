@@ -64,6 +64,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             showPlansAction: featureFlags.playerSubscriptionsEnabled,
             showCoordinatesAction: featureFlags.playerProfileCoordinatesEnabled,
             showRewardsAction: featureFlags.playerProfileRewardsEnabled,
+            showAuthMethodsAction: featureFlags.playerAccountLinkingEnabled,
             onEdit: () => _showEditProfileSheet(context, ref, data),
             onAuthMethodsChanged: () {
               _lastProfileData = null;
@@ -368,6 +369,7 @@ class _CompactProfilePage extends StatelessWidget {
   final bool showPlansAction;
   final bool showCoordinatesAction;
   final bool showRewardsAction;
+  final bool showAuthMethodsAction;
   final VoidCallback onEdit;
   final VoidCallback onAuthMethodsChanged;
 
@@ -376,6 +378,7 @@ class _CompactProfilePage extends StatelessWidget {
     required this.showPlansAction,
     required this.showCoordinatesAction,
     required this.showRewardsAction,
+    required this.showAuthMethodsAction,
     required this.onEdit,
     required this.onAuthMethodsChanged,
   });
@@ -422,12 +425,14 @@ class _CompactProfilePage extends StatelessWidget {
                     onEdit: onEdit,
                   ),
                 ),
-                SizedBox(height: isCompact ? 10 : 12),
-                _LinkedAuthMethodsCard(
-                  data: data,
-                  isCompact: isCompact,
-                  onChanged: onAuthMethodsChanged,
-                ),
+                if (showAuthMethodsAction) ...[
+                  SizedBox(height: isCompact ? 10 : 12),
+                  _LinkedAuthMethodsCard(
+                    data: data,
+                    isCompact: isCompact,
+                    onChanged: onAuthMethodsChanged,
+                  ),
+                ],
                 SizedBox(height: isCompact ? 8 : 10),
                 SizedBox(
                   width: double.infinity,

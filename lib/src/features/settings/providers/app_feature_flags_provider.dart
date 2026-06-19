@@ -47,6 +47,7 @@ class AppFeatureFlags {
   final bool playerProfileCoordinatesEnabled;
   final bool playerProfileRewardsEnabled;
   final bool appReviewSafeEnabled;
+  final bool playerAccountLinkingEnabled;
   final OtpDeliveryChannel otpDeliveryChannel;
   final PlayerAuthMode playerAuthMode;
 
@@ -56,6 +57,7 @@ class AppFeatureFlags {
     required this.playerProfileCoordinatesEnabled,
     required this.playerProfileRewardsEnabled,
     required this.appReviewSafeEnabled,
+    required this.playerAccountLinkingEnabled,
     required this.otpDeliveryChannel,
     required this.playerAuthMode,
   });
@@ -66,6 +68,7 @@ class AppFeatureFlags {
     playerProfileCoordinatesEnabled: true,
     playerProfileRewardsEnabled: true,
     appReviewSafeEnabled: false,
+    playerAccountLinkingEnabled: true,
     otpDeliveryChannel: OtpDeliveryChannel.sms,
     playerAuthMode: PlayerAuthMode.otp,
   );
@@ -76,6 +79,7 @@ class AppFeatureFlags {
     bool? playerProfileCoordinatesEnabled,
     bool? playerProfileRewardsEnabled,
     bool? appReviewSafeEnabled,
+    bool? playerAccountLinkingEnabled,
     OtpDeliveryChannel? otpDeliveryChannel,
     PlayerAuthMode? playerAuthMode,
   }) {
@@ -90,6 +94,8 @@ class AppFeatureFlags {
       playerProfileRewardsEnabled:
           playerProfileRewardsEnabled ?? this.playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled ?? this.appReviewSafeEnabled,
+      playerAccountLinkingEnabled:
+          playerAccountLinkingEnabled ?? this.playerAccountLinkingEnabled,
       otpDeliveryChannel: otpDeliveryChannel ?? this.otpDeliveryChannel,
       playerAuthMode: playerAuthMode ?? this.playerAuthMode,
     );
@@ -107,6 +113,7 @@ class AppFeatureFlags {
     var playerProfileCoordinatesEnabled = true;
     var playerProfileRewardsEnabled = true;
     var appReviewSafeEnabled = false;
+    var playerAccountLinkingEnabled = true;
     var otpDeliveryChannel = OtpDeliveryChannel.sms;
     var playerAuthMode = PlayerAuthMode.otp;
 
@@ -124,6 +131,8 @@ class AppFeatureFlags {
         playerProfileRewardsEnabled = isEnabled;
       } else if (key == 'app_review_safe') {
         appReviewSafeEnabled = isEnabled;
+      } else if (key == 'player_account_linking') {
+        playerAccountLinkingEnabled = isEnabled;
       } else if (key == 'otp_delivery_channel' && isEnabled) {
         final metadata = row['metadata'];
         if (metadata is Map) {
@@ -145,6 +154,7 @@ class AppFeatureFlags {
       playerProfileCoordinatesEnabled: playerProfileCoordinatesEnabled,
       playerProfileRewardsEnabled: playerProfileRewardsEnabled,
       appReviewSafeEnabled: appReviewSafeEnabled,
+      playerAccountLinkingEnabled: playerAccountLinkingEnabled,
       otpDeliveryChannel: otpDeliveryChannel,
       playerAuthMode: playerAuthMode,
     ).appStoreSafe();
@@ -165,6 +175,7 @@ final appFeatureFlagsProvider = StreamProvider.autoDispose<AppFeatureFlags>((
           'player_profile_coordinates',
           'player_profile_rewards',
           'app_review_safe',
+          'player_account_linking',
           'otp_delivery_channel',
           'player_auth_mode',
         ]);
