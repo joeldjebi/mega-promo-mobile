@@ -184,7 +184,12 @@ class _AccountStatusGuardState extends ConsumerState<AccountStatusGuard>
             final row = payload.newRecord.isNotEmpty
                 ? payload.newRecord
                 : payload.oldRecord;
-            unawaited(_handleAccountRow(row));
+            unawaited(
+              _handleAccountRow(
+                row,
+                forceDisconnect: payload.eventType == PostgresChangeEvent.delete,
+              ),
+            );
           },
         )
         .subscribe();
@@ -223,12 +228,15 @@ class _AccountStatusGuardState extends ConsumerState<AccountStatusGuard>
     }
   }
 
-  Future<void> _handleAccountRow(Map<String, dynamic>? row) async {
+  Future<void> _handleAccountRow(
+    Map<String, dynamic>? row, {
+    bool forceDisconnect = false,
+  }) async {
     if (_isSigningOut || Supabase.instance.client.auth.currentUser == null) {
       return;
     }
 
-    if (!_shouldDisconnectForAccountRow(row)) return;
+    if (!forceDisconnect && !_shouldDisconnectForAccountRow(row)) return;
 
     _isSigningOut = true;
     try {
@@ -255,7 +263,7 @@ class _AccountStatusGuardState extends ConsumerState<AccountStatusGuard>
   }
 
   bool _shouldDisconnectForAccountRow(Map<String, dynamic>? row) {
-    if (row == null || row.isEmpty) return true;
+    if (row == null || row.isEmpty) return false;
     final status = (row['account_status'] as String? ?? '').toLowerCase();
     final isActive = row['is_active'] as bool? ?? true;
     if (status == 'deleted') return true;
