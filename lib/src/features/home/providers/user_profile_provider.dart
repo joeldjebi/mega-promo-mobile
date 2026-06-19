@@ -134,6 +134,29 @@ Future<UserProfile> fetchCurrentUserProfile(Ref ref, {String? userId}) async {
     if (data == null) {
       throw StateError('Profil joueur introuvable.');
     }
+
+    final currentUserPhone = supabase.auth.currentUser?.phone;
+    final profilePhone = data['phone'] as String?;
+    if ((profilePhone == null || profilePhone.trim().isEmpty) &&
+        currentUserPhone != null &&
+        currentUserPhone.trim().isNotEmpty) {
+      authLogPayload('userProfilePhoneRepair', {
+        'id': resolvedUserId,
+        'phone': currentUserPhone,
+      });
+      final repairedProfile = await supabase
+          .from('users')
+          .update({'phone': currentUserPhone})
+          .eq('id', resolvedUserId)
+          .select(
+            'id, phone, username, avatar_url, is_premium, points_total, participations_today, last_participation_date',
+          )
+          .maybeSingle();
+      if (repairedProfile != null) {
+        data = repairedProfile;
+        authLogResponse('userProfilePhoneRepair', repairedProfile);
+      }
+    }
   } catch (error) {
     NetworkStatusService.instance.markOfflineFromError(error);
     rethrow;

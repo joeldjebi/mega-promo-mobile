@@ -38,9 +38,68 @@ class NativeSocialAuthService {
     };
   }
 
+  static Future<AuthResponse> link(NativeSocialProvider provider) {
+    return switch (provider) {
+      NativeSocialProvider.google => linkWithGoogle(),
+      NativeSocialProvider.apple => linkWithApple(),
+    };
+  }
+
   static Future<AuthResponse> signInWithGoogle() async {
     final supabase = Supabase.instance.client;
+    final token = await _getGoogleToken();
 
+    return supabase.auth.signInWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: token.idToken,
+      accessToken: token.accessToken,
+      nonce: token.rawNonce,
+    );
+  }
+
+  static Future<AuthResponse> signInWithApple() async {
+    final supabase = Supabase.instance.client;
+    final token = await _getAppleToken();
+
+    return supabase.auth.signInWithIdToken(
+      provider: OAuthProvider.apple,
+      idToken: token.idToken,
+      nonce: token.rawNonce,
+    );
+  }
+
+  static Future<AuthResponse> linkWithGoogle() async {
+    final supabase = Supabase.instance.client;
+    if (supabase.auth.currentSession == null) {
+      throw const AuthException('Connexion requise pour lier Google.');
+    }
+
+    final token = await _getGoogleToken(logPrefix: 'nativeGoogleLink');
+    return supabase.auth.linkIdentityWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: token.idToken,
+      accessToken: token.accessToken,
+      nonce: token.rawNonce,
+    );
+  }
+
+  static Future<AuthResponse> linkWithApple() async {
+    final supabase = Supabase.instance.client;
+    if (supabase.auth.currentSession == null) {
+      throw const AuthException('Connexion requise pour lier Apple.');
+    }
+
+    final token = await _getAppleToken(logPrefix: 'nativeAppleLink');
+    return supabase.auth.linkIdentityWithIdToken(
+      provider: OAuthProvider.apple,
+      idToken: token.idToken,
+      nonce: token.rawNonce,
+    );
+  }
+
+  static Future<_NativeSocialToken> _getGoogleToken({
+    String logPrefix = 'nativeGoogleSignIn',
+  }) async {
     if (kGoogleWebClientId.trim().isEmpty) {
       throw const AuthException(
         'Configuration Google manquante: GOOGLE_WEB_CLIENT_ID.',
@@ -59,7 +118,7 @@ class NativeSocialAuthService {
     );
     await _googleInitialization;
 
-    authLogPayload('nativeGoogleSignIn', {
+    authLogPayload(logPrefix, {
       'hasWebClientId': kGoogleWebClientId.trim().isNotEmpty,
       'hasIosClientId': kGoogleIosClientId.trim().isNotEmpty,
       'platform': Platform.operatingSystem,
@@ -79,7 +138,7 @@ class NativeSocialAuthService {
     }
     final tokenNonce = _jwtPayloadStringValue(idToken, 'nonce');
 
-    authLogResponse('nativeGoogleSignIn', {
+    authLogResponse(logPrefix, {
       'email': account.email,
       'hasIdToken': true,
       'hasAccessToken': authorization?.accessToken != null,
@@ -87,15 +146,16 @@ class NativeSocialAuthService {
       'idTokenNonceMatchesLocalHash': tokenNonce == _googleHashedNonce,
     });
 
-    return supabase.auth.signInWithIdToken(
-      provider: OAuthProvider.google,
+    return _NativeSocialToken(
       idToken: idToken,
       accessToken: authorization?.accessToken,
-      nonce: _googleRawNonce,
+      rawNonce: _googleRawNonce,
     );
   }
 
-  static Future<AuthResponse> signInWithApple() async {
+  static Future<_NativeSocialToken> _getAppleToken({
+    String logPrefix = 'nativeAppleSignIn',
+  }) async {
     if (!Platform.isIOS && !Platform.isMacOS) {
       throw const AuthException(
         'Connexion Apple disponible uniquement sur appareil Apple.',
@@ -106,7 +166,7 @@ class NativeSocialAuthService {
     final rawNonce = supabase.auth.generateRawNonce();
     final hashedNonce = _sha256String(rawNonce);
 
-    authLogPayload('nativeAppleSignIn', {
+    authLogPayload(logPrefix, {
       'platform': Platform.operatingSystem,
       'hasNonce': true,
     });
@@ -124,17 +184,13 @@ class NativeSocialAuthService {
       throw const AuthException('Apple n’a pas retourné de jeton ID.');
     }
 
-    authLogResponse('nativeAppleSignIn', {
+    authLogResponse(logPrefix, {
       'email': credential.email,
       'userIdentifier': credential.userIdentifier,
       'hasIdToken': true,
     });
 
-    return supabase.auth.signInWithIdToken(
-      provider: OAuthProvider.apple,
-      idToken: idToken,
-      nonce: rawNonce,
-    );
+    return _NativeSocialToken(idToken: idToken, rawNonce: rawNonce);
   }
 
   static String? _jwtPayloadStringValue(String token, String key) {
@@ -158,4 +214,16 @@ class NativeSocialAuthService {
   static String _sha256String(String value) {
     return sha256.convert(utf8.encode(value)).toString();
   }
+}
+
+class _NativeSocialToken {
+  final String idToken;
+  final String? accessToken;
+  final String? rawNonce;
+
+  const _NativeSocialToken({
+    required this.idToken,
+    this.accessToken,
+    this.rawNonce,
+  });
 }

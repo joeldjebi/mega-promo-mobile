@@ -456,7 +456,8 @@ class _MainBottomNav extends StatelessWidget {
 
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
-    if (location.startsWith('/subscriptions')) {
+    if (location.startsWith('/subscriptions') ||
+        location.startsWith('/participations/')) {
       return MainShell._items.indexWhere((item) => item.path == '/profile');
     }
     final index = MainShell._items.indexWhere(

@@ -26,6 +26,7 @@ import 'src/services/device_session_service.dart';
 import 'src/services/device_telemetry_service.dart';
 import 'src/services/fcm_service.dart';
 import 'src/services/live_quiz_notification_service.dart';
+import 'src/services/network_status_service.dart';
 import 'src/services/synced_clock_service.dart';
 import 'src/widgets/network_status_banner.dart';
 
@@ -105,12 +106,162 @@ class KonkourApp extends ConsumerWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         builder: (context, child) {
-          return NetworkStatusBanner(child: child ?? const SizedBox.shrink());
+          return AccountStatusGuard(
+            child: NetworkStatusBanner(child: child ?? const SizedBox.shrink()),
+          );
         },
         routerConfig: router,
         scaffoldMessengerKey: scaffoldMessengerKey,
       ),
     );
+  }
+}
+
+class AccountStatusGuard extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const AccountStatusGuard({super.key, required this.child});
+
+  @override
+  ConsumerState<AccountStatusGuard> createState() => _AccountStatusGuardState();
+}
+
+class _AccountStatusGuardState extends ConsumerState<AccountStatusGuard>
+    with WidgetsBindingObserver {
+  RealtimeChannel? _channel;
+  String? _watchedUserId;
+  bool _isSigningOut = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _removeChannel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkCurrentAccountStatus());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final userId = ref.watch(currentUserIdProvider);
+    if (userId != _watchedUserId) {
+      _watchedUserId = userId;
+      _subscribeToUser(userId);
+      unawaited(_checkCurrentAccountStatus());
+    }
+
+    return widget.child;
+  }
+
+  void _subscribeToUser(String? userId) {
+    _removeChannel();
+    if (userId == null) return;
+
+    final supabase = Supabase.instance.client;
+    _channel = supabase
+        .channel('mobile-account-status-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'users',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: userId,
+          ),
+          callback: (payload) {
+            final row = payload.newRecord.isNotEmpty
+                ? payload.newRecord
+                : payload.oldRecord;
+            unawaited(_handleAccountRow(row));
+          },
+        )
+        .subscribe();
+  }
+
+  void _removeChannel() {
+    final channel = _channel;
+    _channel = null;
+    if (channel != null) {
+      unawaited(Supabase.instance.client.removeChannel(channel));
+    }
+  }
+
+  Future<void> _checkCurrentAccountStatus() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null || _isSigningOut) return;
+    if (!NetworkStatusService.instance.canAttemptNetwork) return;
+
+    try {
+      final row = await Supabase.instance.client
+          .from('users')
+          .select('id, is_active, account_status')
+          .eq('id', userId)
+          .maybeSingle();
+      await _handleAccountRow(row);
+    } catch (error, stackTrace) {
+      NetworkStatusService.instance.markOfflineFromError(error);
+      if (AppTelemetryService.isRetryableNetworkError(error)) return;
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'account_status_guard_check_failed',
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleAccountRow(Map<String, dynamic>? row) async {
+    if (_isSigningOut || Supabase.instance.client.auth.currentUser == null) {
+      return;
+    }
+
+    if (!_shouldDisconnectForAccountRow(row)) return;
+
+    _isSigningOut = true;
+    try {
+      await Supabase.instance.client.auth.signOut();
+      if (mounted) {
+        _invalidateSessionScopedState(ref, userId: _watchedUserId);
+      }
+      scaffoldMessengerKey.currentState?.showSnackBar(
+        const SnackBar(
+          content: Text('Ton compte a été désactivé. Connexion fermée.'),
+        ),
+      );
+    } catch (error, stackTrace) {
+      unawaited(
+        AppTelemetryService.recordError(
+          error,
+          stackTrace,
+          reason: 'account_status_guard_signout_failed',
+        ),
+      );
+    } finally {
+      _isSigningOut = false;
+    }
+  }
+
+  bool _shouldDisconnectForAccountRow(Map<String, dynamic>? row) {
+    if (row == null || row.isEmpty) return true;
+    final status = (row['account_status'] as String? ?? '').toLowerCase();
+    final isActive = row['is_active'] as bool? ?? true;
+    if (status == 'deleted') return true;
+    if (status == 'pending_deletion') return true;
+    if (!isActive) return true;
+    return false;
   }
 }
 

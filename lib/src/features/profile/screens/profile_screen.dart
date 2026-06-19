@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/fcm_service.dart';
+import '../../auth/services/native_social_auth_service.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../home/screens/home_screen.dart';
@@ -62,6 +65,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             showCoordinatesAction: featureFlags.playerProfileCoordinatesEnabled,
             showRewardsAction: featureFlags.playerProfileRewardsEnabled,
             onEdit: () => _showEditProfileSheet(context, ref, data),
+            onAuthMethodsChanged: () {
+              _lastProfileData = null;
+              ref
+                ..invalidate(userProfileProvider)
+                ..invalidate(profileDataProvider);
+            },
           ),
           loading: () => const _ProfileSkeletonPage(),
           error: (error, stackTrace) => Center(
@@ -360,6 +369,7 @@ class _CompactProfilePage extends StatelessWidget {
   final bool showCoordinatesAction;
   final bool showRewardsAction;
   final VoidCallback onEdit;
+  final VoidCallback onAuthMethodsChanged;
 
   const _CompactProfilePage({
     required this.data,
@@ -367,6 +377,7 @@ class _CompactProfilePage extends StatelessWidget {
     required this.showCoordinatesAction,
     required this.showRewardsAction,
     required this.onEdit,
+    required this.onAuthMethodsChanged,
   });
 
   @override
@@ -410,6 +421,12 @@ class _CompactProfilePage extends StatelessWidget {
                     isCompact: isCompact,
                     onEdit: onEdit,
                   ),
+                ),
+                SizedBox(height: isCompact ? 10 : 12),
+                _LinkedAuthMethodsCard(
+                  data: data,
+                  isCompact: isCompact,
+                  onChanged: onAuthMethodsChanged,
                 ),
                 SizedBox(height: isCompact ? 8 : 10),
                 SizedBox(
@@ -854,6 +871,565 @@ class _CompactDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(width: 1, height: 34, color: const Color(0xFFE8E9EE));
+  }
+}
+
+class _LinkedAuthMethodsCard extends StatefulWidget {
+  final ProfileData data;
+  final bool isCompact;
+  final VoidCallback onChanged;
+
+  const _LinkedAuthMethodsCard({
+    required this.data,
+    required this.isCompact,
+    required this.onChanged,
+  });
+
+  @override
+  State<_LinkedAuthMethodsCard> createState() => _LinkedAuthMethodsCardState();
+}
+
+class _LinkedAuthMethodsCardState extends State<_LinkedAuthMethodsCard> {
+  int _reloadTick = 0;
+  NativeSocialProvider? _linkingProvider;
+  bool _isLinkingPhone = false;
+
+  Future<List<UserIdentity>> _loadIdentities() async {
+    return Supabase.instance.client.auth.getUserIdentities();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<UserIdentity>>(
+      key: ValueKey(_reloadTick),
+      future: _loadIdentities(),
+      builder: (context, snapshot) {
+        final identities = snapshot.data ?? const <UserIdentity>[];
+        final isLoading = snapshot.connectionState == ConnectionState.waiting;
+        final currentUser = Supabase.instance.client.auth.currentUser;
+        final hasPhone =
+            (currentUser?.phone?.trim().isNotEmpty ?? false) ||
+            (widget.data.user.phone?.trim().isNotEmpty ?? false);
+        final hasGoogle = identities.any((identity) {
+          return identity.provider.toLowerCase() == 'google';
+        });
+        final hasApple = identities.any((identity) {
+          return identity.provider.toLowerCase() == 'apple';
+        });
+
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(widget.isCompact ? 12 : 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.surfaceBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.link_rounded,
+                      color: AppColors.primary,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Moyens de connexion',
+                          style: AppTextStyles.h3.copyWith(
+                            fontSize: widget.isCompact ? 15 : 16,
+                          ),
+                        ),
+                        Text(
+                          'Lie plusieurs accès au même compte.',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textHint,
+                            fontSize: widget.isCompact ? 10.5 : 11.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isLoading)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _LinkedAuthMethodRow(
+                icon: Icons.phone_iphone_rounded,
+                title: 'Téléphone',
+                subtitle: hasPhone
+                    ? (currentUser?.phone ?? widget.data.user.phone ?? 'Lié')
+                    : 'Ajouter un numéro sécurisé par OTP',
+                isLinked: hasPhone,
+                isBusy: _isLinkingPhone,
+                actionLabel: hasPhone ? 'Lié' : 'Ajouter',
+                onPressed: hasPhone || _isLinkingPhone
+                    ? null
+                    : () => _showLinkPhoneSheet(context),
+              ),
+              const SizedBox(height: 8),
+              _LinkedAuthMethodRow(
+                icon: Icons.g_mobiledata_rounded,
+                leading: const _ProfileGoogleLogoMark(size: 22),
+                title: 'Google',
+                subtitle: hasGoogle
+                    ? _identityEmail(identities, 'google') ?? 'Compte lié'
+                    : 'Connexion rapide avec Google',
+                isLinked: hasGoogle,
+                isBusy: _linkingProvider == NativeSocialProvider.google,
+                actionLabel: hasGoogle ? 'Lié' : 'Lier',
+                onPressed: hasGoogle || _linkingProvider != null
+                    ? null
+                    : () => _linkSocial(NativeSocialProvider.google),
+              ),
+              const SizedBox(height: 8),
+              _LinkedAuthMethodRow(
+                icon: Icons.apple_rounded,
+                title: 'Apple',
+                subtitle: hasApple
+                    ? _identityEmail(identities, 'apple') ?? 'Compte lié'
+                    : 'Connexion rapide avec Apple',
+                isLinked: hasApple,
+                isBusy: _linkingProvider == NativeSocialProvider.apple,
+                actionLabel: hasApple ? 'Lié' : 'Lier',
+                onPressed: hasApple || _linkingProvider != null
+                    ? null
+                    : () => _linkSocial(NativeSocialProvider.apple),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _linkSocial(NativeSocialProvider provider) async {
+    setState(() => _linkingProvider = provider);
+    try {
+      await NativeSocialAuthService.link(provider);
+      if (!mounted) return;
+      setState(() {
+        _linkingProvider = null;
+        _reloadTick++;
+      });
+      widget.onChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${_providerLabel(provider)} est lié.')),
+      );
+    } catch (error, stackTrace) {
+      await AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'link_social_identity_failed',
+      );
+      if (!mounted) return;
+      setState(() => _linkingProvider = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_socialLinkErrorMessage(error))));
+    }
+  }
+
+  Future<void> _showLinkPhoneSheet(BuildContext context) async {
+    final linked = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _LinkPhoneSheet(
+        onBusyChanged: (value) {
+          if (mounted) setState(() => _isLinkingPhone = value);
+        },
+      ),
+    );
+
+    if (linked != true || !mounted || !context.mounted) return;
+    setState(() => _reloadTick++);
+    widget.onChanged();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Numéro de téléphone lié.')));
+  }
+
+  static String? _identityEmail(
+    List<UserIdentity> identities,
+    String provider,
+  ) {
+    for (final identity in identities) {
+      if (identity.provider.toLowerCase() != provider) continue;
+      final email = identity.identityData?['email'];
+      if (email is String && email.trim().isNotEmpty) return email;
+    }
+    return null;
+  }
+
+  static String _providerLabel(NativeSocialProvider provider) {
+    return switch (provider) {
+      NativeSocialProvider.google => 'Google',
+      NativeSocialProvider.apple => 'Apple',
+    };
+  }
+
+  static String _socialLinkErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('identity_already_exists') ||
+        message.contains('already') ||
+        message.contains('exists')) {
+      return 'Ce moyen de connexion est déjà utilisé par un autre compte.';
+    }
+    return 'Impossible de lier ce moyen de connexion pour le moment.';
+  }
+}
+
+class _LinkedAuthMethodRow extends StatelessWidget {
+  final IconData icon;
+  final Widget? leading;
+  final String title;
+  final String subtitle;
+  final bool isLinked;
+  final bool isBusy;
+  final String actionLabel;
+  final VoidCallback? onPressed;
+
+  const _LinkedAuthMethodRow({
+    required this.icon,
+    this.leading,
+    required this.title,
+    required this.subtitle,
+    required this.isLinked,
+    required this.isBusy,
+    required this.actionLabel,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = isLinked ? AppColors.accentGreen : AppColors.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Center(
+              child: leading ?? Icon(icon, color: statusColor, size: 22),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppTextStyles.body.copyWith(height: 1.1)),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textHint,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: isBusy ? null : onPressed,
+            style: TextButton.styleFrom(
+              foregroundColor: statusColor,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: isBusy
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileGoogleLogoMark extends StatelessWidget {
+  final double size;
+
+  const _ProfileGoogleLogoMark({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _ProfileGoogleLogoPainter()),
+    );
+  }
+}
+
+class _ProfileGoogleLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = size.width * 0.16;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.34;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    void drawArc(Color color, double start, double sweep) {
+      canvas.drawArc(
+        rect,
+        start,
+        sweep,
+        false,
+        Paint()
+          ..color = color
+          ..strokeWidth = strokeWidth
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+    }
+
+    drawArc(const Color(0xFF4285F4), -0.12, math.pi * 0.42);
+    drawArc(const Color(0xFF34A853), math.pi * 0.30, math.pi * 0.48);
+    drawArc(const Color(0xFFFBBC05), math.pi * 0.82, math.pi * 0.36);
+    drawArc(const Color(0xFFEA4335), math.pi * 1.18, math.pi * 0.62);
+
+    final barPaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.square
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(
+      Offset(size.width * 0.53, size.height * 0.50),
+      Offset(size.width * 0.86, size.height * 0.50),
+      barPaint,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.74, size.height * 0.50),
+      Offset(size.width * 0.74, size.height * 0.63),
+      barPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _LinkPhoneSheet extends StatefulWidget {
+  final ValueChanged<bool> onBusyChanged;
+
+  const _LinkPhoneSheet({required this.onBusyChanged});
+
+  @override
+  State<_LinkPhoneSheet> createState() => _LinkPhoneSheetState();
+}
+
+class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
+  final _phoneController = TextEditingController();
+  final _otpController = TextEditingController();
+  String? _pendingPhone;
+  bool _isBusy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Ajouter un numéro', style: AppTextStyles.h2),
+            const SizedBox(height: 6),
+            Text(
+              _pendingPhone == null
+                  ? 'Renseigne le numéro à lier à ce compte MegaPromo.'
+                  : 'Entre le code OTP reçu au $_pendingPhone.',
+              style: AppTextStyles.bodySecondary,
+            ),
+            const SizedBox(height: 16),
+            if (_pendingPhone == null)
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Numéro de téléphone',
+                  hintText: '+2250700000000',
+                ),
+              )
+            else
+              TextField(
+                controller: _otpController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Code OTP',
+                  hintText: '123456',
+                ),
+              ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.accentRed,
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _isBusy
+                        ? null
+                        : () => Navigator.of(context).pop(false),
+                    child: const Text('Annuler'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: AppButton(
+                    text: _pendingPhone == null
+                        ? 'Recevoir le code'
+                        : 'Vérifier',
+                    isLoading: _isBusy,
+                    onPressed: _isBusy
+                        ? null
+                        : (_pendingPhone == null ? _sendOtp : _verifyOtp),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendOtp() async {
+    final phone = _normalizePhoneNumber(_phoneController.text);
+    if (phone.length < 9) {
+      setState(() => _error = 'Renseigne un numéro valide.');
+      return;
+    }
+
+    _setBusy(true);
+    try {
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(phone: phone),
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingPhone = phone;
+        _error = null;
+      });
+    } catch (error, stackTrace) {
+      await AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'link_phone_send_otp_failed',
+      );
+      if (!mounted) return;
+      setState(() {
+        _error = 'Impossible d’envoyer le code pour le moment.';
+      });
+    } finally {
+      if (mounted) _setBusy(false);
+    }
+  }
+
+  Future<void> _verifyOtp() async {
+    final phone = _pendingPhone;
+    final token = _otpController.text.trim();
+    if (phone == null || token.length < 4) {
+      setState(() => _error = 'Renseigne le code reçu.');
+      return;
+    }
+
+    _setBusy(true);
+    try {
+      await Supabase.instance.client.auth.verifyOTP(
+        phone: phone,
+        token: token,
+        type: OtpType.phoneChange,
+      );
+      final userResponse = await Supabase.instance.client.auth.getUser();
+      final userId =
+          userResponse.user?.id ??
+          Supabase.instance.client.auth.currentUser?.id;
+      final linkedPhone = userResponse.user?.phone?.trim().isNotEmpty == true
+          ? userResponse.user!.phone!
+          : phone;
+      if (userId != null) {
+        await Supabase.instance.client
+            .from('users')
+            .update({'phone': linkedPhone})
+            .eq('id', userId);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error, stackTrace) {
+      await AppTelemetryService.recordError(
+        error,
+        stackTrace,
+        reason: 'link_phone_verify_otp_failed',
+      );
+      if (!mounted) return;
+      setState(() {
+        _error = 'Code invalide ou expiré.';
+      });
+    } finally {
+      if (mounted) _setBusy(false);
+    }
+  }
+
+  void _setBusy(bool value) {
+    setState(() => _isBusy = value);
+    widget.onBusyChanged(value);
   }
 }
 
@@ -1981,6 +2557,16 @@ String _formatPhoneDigits(String value, int maxDigits) {
   }
 
   return groups.join(' ');
+}
+
+String _normalizePhoneNumber(String value) {
+  final trimmed = value.trim();
+  final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits.isEmpty) return '';
+  if (trimmed.startsWith('+')) return '+$digits';
+  if (digits.startsWith('225')) return '+$digits';
+  if (digits.length >= 8 && digits.length <= 10) return '+225$digits';
+  return '+$digits';
 }
 
 String _phoneHint(int phoneDigits) {
