@@ -10,6 +10,8 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/src/shared/widgets/promo_watermark_background.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../home/providers/home_bootstrap_provider.dart';
+import '../../home/providers/user_profile_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../utils/auth_debug_logger.dart';
 
@@ -66,17 +68,19 @@ class _OnboardingUsernameScreenState
 
     try {
       authLogPayload('onboardingUsernameCheck', {'username': username});
-      final existingUser = await Supabase.instance.client
-          .from('users')
-          .select('id')
-          .eq('username', username)
-          .maybeSingle();
-      authLogResponse('onboardingUsernameCheck', existingUser);
+      final isAvailable = await Supabase.instance.client.rpc<bool>(
+        'is_username_available',
+        params: {'p_username': username},
+      );
+      authLogResponse('onboardingUsernameCheck', {
+        'username': username,
+        'isAvailable': isAvailable,
+      });
 
       if (!mounted) return;
       setState(() {
-        _isAvailable = existingUser == null;
-        _errorText = existingUser == null ? null : 'Ce pseudo est déjà pris.';
+        _isAvailable = isAvailable;
+        _errorText = isAvailable ? null : 'Ce pseudo est déjà pris.';
       });
     } catch (error, stackTrace) {
       authLogError('onboardingUsernameCheck', error, stackTrace);
@@ -225,6 +229,19 @@ class _OnboardingAvatarScreenState
     setState(() => _isSaving = true);
 
     try {
+      final isAvailable = await supabase.rpc<bool>(
+        'is_username_available',
+        params: {'p_username': username, 'p_exclude_user_id': user.id},
+      );
+      if (!isAvailable) {
+        if (!mounted) return;
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ce pseudo est déjà pris.')),
+        );
+        return;
+      }
+
       final payload = {
         'id': user.id,
         if (user.phone != null && user.phone!.trim().isNotEmpty)
@@ -247,12 +264,21 @@ class _OnboardingAvatarScreenState
 
       if (!mounted) return;
       ref.invalidate(onboardingUsernameProvider);
+      ref.invalidate(userProfileProvider);
+      ref.invalidate(homeBootstrapProvider);
+      clearHomeBootstrapCache(userId: user.id, clearStored: true);
       context.go('/home');
     } catch (error, stackTrace) {
       authLogError('onboardingSaveProfile', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Impossible de sauvegarder ton profil.')),
+        SnackBar(
+          content: Text(
+            _isUsernameConflictError(error)
+                ? 'Ce pseudo est déjà pris.'
+                : 'Impossible de sauvegarder ton profil.',
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -321,6 +347,14 @@ class _OnboardingAvatarScreenState
       ),
     );
   }
+}
+
+bool _isUsernameConflictError(Object error) {
+  if (error is! PostgrestException) return false;
+  final message = error.message.toLowerCase();
+  return error.code == '23505' ||
+      message.contains('users_username_lower_unique_idx') ||
+      message.contains('duplicate key');
 }
 
 class _OnboardingProgress extends StatelessWidget {

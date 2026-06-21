@@ -13,6 +13,7 @@ import '../../../services/synced_clock_service.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../models/question.dart';
 import '../providers/quiz_providers.dart';
+import '../services/quiz_asset_preload_service.dart';
 
 class QuizScreen extends ConsumerWidget {
   final String contestId;
@@ -91,12 +92,16 @@ class QuizScreen extends ConsumerWidget {
           body: questions.when(
             data: (items) => items.isEmpty
                 ? const _EmptyQuiz()
-                : _QuizRunner(
+                : _QuizMediaPreloadGate(
                     contestId: contestId,
-                    participationId: participationId,
-                    isLive: detailData.contest.isLive,
-                    liveStartsAt: detailData.contest.liveStartsAt,
                     questions: items,
+                    child: _QuizRunner(
+                      contestId: contestId,
+                      participationId: participationId,
+                      isLive: detailData.contest.isLive,
+                      liveStartsAt: detailData.contest.liveStartsAt,
+                      questions: items,
+                    ),
                   ),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, stackTrace) => const _EmptyQuiz(),
@@ -226,6 +231,200 @@ class _QuizAlreadyStarted extends StatelessWidget {
               const SizedBox(height: 20),
               AppButton(text: 'Retour au quiz', onPressed: onBack),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuizMediaPreloadGate extends StatefulWidget {
+  final String contestId;
+  final List<QuizQuestion> questions;
+  final Widget child;
+
+  const _QuizMediaPreloadGate({
+    required this.contestId,
+    required this.questions,
+    required this.child,
+  });
+
+  @override
+  State<_QuizMediaPreloadGate> createState() => _QuizMediaPreloadGateState();
+}
+
+class _QuizMediaPreloadGateState extends State<_QuizMediaPreloadGate> {
+  Future<QuizMediaPreloadResult>? _preloadFuture;
+  int _loaded = 0;
+  int _total = 0;
+  bool _didStart = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_didStart) {
+      _didStart = true;
+      _startPreload();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _QuizMediaPreloadGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.contestId != widget.contestId ||
+        oldWidget.questions != widget.questions) {
+      _startPreload();
+    }
+  }
+
+  void _startPreload({bool force = false}) {
+    _loaded = 0;
+    _total = QuizAssetPreloadService.mediaUrlsForQuestions(
+      widget.questions,
+    ).length;
+    _preloadFuture = QuizAssetPreloadService.preloadQuestionMedia(
+      context,
+      cacheScope: widget.contestId,
+      questions: widget.questions,
+      force: force,
+      onProgress: (loaded, total) {
+        if (!mounted) return;
+        setState(() {
+          _loaded = loaded;
+          _total = total;
+        });
+      },
+    );
+  }
+
+  void _retry() {
+    setState(() => _startPreload(force: true));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<QuizMediaPreloadResult>(
+      future: _preloadFuture,
+      builder: (context, snapshot) {
+        final result = snapshot.data;
+        if (snapshot.connectionState == ConnectionState.done &&
+            result != null &&
+            result.isComplete) {
+          return widget.child;
+        }
+
+        if (snapshot.connectionState == ConnectionState.done &&
+            result != null &&
+            !result.isComplete) {
+          return _QuizMediaPreloadError(
+            failedCount: result.failedUrls.length,
+            onRetry: _retry,
+            onBack: () => context.go('/contests/${widget.contestId}'),
+          );
+        }
+
+        return _QuizMediaPreloadLoading(loaded: _loaded, total: _total);
+      },
+    );
+  }
+}
+
+class _QuizMediaPreloadLoading extends StatelessWidget {
+  final int loaded;
+  final int total;
+
+  const _QuizMediaPreloadLoading({required this.loaded, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMedia = total > 0;
+    final progress = hasMedia ? loaded / total : null;
+
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: AppCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 58,
+                  height: 58,
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    strokeWidth: 7,
+                    backgroundColor: AppColors.surfaceElevated,
+                    color: AppColors.primaryLight,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Préparation du quiz',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.h2,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  hasMedia
+                      ? 'Chargement des images $loaded/$total...'
+                      : 'Vérification des questions...',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodySecondary,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuizMediaPreloadError extends StatelessWidget {
+  final int failedCount;
+  final VoidCallback onRetry;
+  final VoidCallback onBack;
+
+  const _QuizMediaPreloadError({
+    required this.failedCount,
+    required this.onRetry,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: AppCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.image_not_supported_rounded,
+                  color: AppColors.gold,
+                  size: 42,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Images non chargées',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.h2,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Le quiz contient $failedCount image(s) qui n’ont pas pu être chargées. Réessaie avant de démarrer.',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodySecondary,
+                ),
+                const SizedBox(height: 20),
+                AppButton(text: 'Réessayer', onPressed: onRetry),
+                const SizedBox(height: 10),
+                TextButton(onPressed: onBack, child: const Text('Retour')),
+              ],
+            ),
           ),
         ),
       ),

@@ -134,6 +134,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     try {
       authLogPayload('signInWithNativeSocial', {'provider': provider.name});
 
+      if (Platform.isAndroid && provider == NativeSocialProvider.google) {
+        final launched = await NativeSocialAuthService.signInWithGoogleOAuth();
+        authLogResponse('signInWithNativeSocial', {
+          'provider': provider.name,
+          'mode': 'oauth_external',
+          'launched': launched,
+        });
+        if (!launched && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Impossible d’ouvrir la connexion Google.'),
+            ),
+          );
+        }
+        return;
+      }
+
       final response = await NativeSocialAuthService.signIn(provider);
       final session = response.session;
       final user = response.user;

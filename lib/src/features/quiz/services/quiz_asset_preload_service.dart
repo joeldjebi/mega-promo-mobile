@@ -6,6 +6,22 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../auth/utils/auth_debug_logger.dart';
 import '../models/question.dart';
 
+typedef QuizAssetPreloadProgress = void Function(int loaded, int total);
+
+class QuizMediaPreloadResult {
+  final int total;
+  final int loaded;
+  final List<String> failedUrls;
+
+  const QuizMediaPreloadResult({
+    required this.total,
+    required this.loaded,
+    required this.failedUrls,
+  });
+
+  bool get isComplete => failedUrls.isEmpty;
+}
+
 class QuizAssetPreloadService {
   QuizAssetPreloadService._();
 
@@ -121,6 +137,15 @@ class QuizAssetPreloadService {
     final questions = await fetchQuestions(contestId, force: force);
     if (!context.mounted) return;
 
+    await preloadQuestionMedia(
+      context,
+      cacheScope: contestId,
+      questions: questions,
+      force: force,
+    );
+  }
+
+  static List<String> mediaUrlsForQuestions(List<QuizQuestion> questions) {
     final urls = <String>{};
     for (final question in questions) {
       final questionImageUrl = question.questionImageUrl;
@@ -133,18 +158,54 @@ class QuizAssetPreloadService {
         }
       }
     }
+    return urls.toList(growable: false);
+  }
+
+  static Future<QuizMediaPreloadResult> preloadQuestionMedia(
+    BuildContext context, {
+    required String cacheScope,
+    required List<QuizQuestion> questions,
+    bool force = false,
+    Duration perImageTimeout = const Duration(seconds: 15),
+    QuizAssetPreloadProgress? onProgress,
+  }) async {
+    final urls = mediaUrlsForQuestions(questions);
+    if (urls.isEmpty) {
+      onProgress?.call(0, 0);
+      return const QuizMediaPreloadResult(total: 0, loaded: 0, failedUrls: []);
+    }
+
+    var loaded = 0;
+    final failedUrls = <String>[];
+    onProgress?.call(loaded, urls.length);
 
     await Future.wait(
       urls.map((url) async {
-        final cacheKey = '$contestId::$url';
-        if (!force && _imageCacheKeys.contains(cacheKey)) return;
+        final cacheKey = '$cacheScope::$url';
+        if (!force && _imageCacheKeys.contains(cacheKey)) {
+          loaded++;
+          onProgress?.call(loaded, urls.length);
+          return;
+        }
         try {
-          await precacheImage(NetworkImage(url), context);
+          await precacheImage(
+            NetworkImage(url),
+            context,
+          ).timeout(perImageTimeout);
           _imageCacheKeys.add(cacheKey);
         } catch (_) {
-          // A broken remote image should not block the live quiz startup.
+          failedUrls.add(url);
+        } finally {
+          loaded++;
+          onProgress?.call(loaded, urls.length);
         }
       }),
+    );
+
+    return QuizMediaPreloadResult(
+      total: urls.length,
+      loaded: loaded,
+      failedUrls: failedUrls,
     );
   }
 

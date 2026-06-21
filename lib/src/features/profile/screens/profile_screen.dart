@@ -74,16 +74,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             },
           ),
           loading: () => const _ProfileSkeletonPage(),
-          error: (error, stackTrace) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                'Profil indisponible',
-                textAlign: TextAlign.center,
-                style: AppTextStyles.bodySecondary,
-              ),
-            ),
-          ),
+          error: (error, stackTrace) => const _ProfileSkeletonPage(),
         ),
       ),
     );
@@ -3563,14 +3554,12 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) throw StateError('Utilisateur non connecté.');
 
-      final existing = await supabase
-          .from('users')
-          .select('id')
-          .eq('username', username)
-          .neq('id', currentUser.id)
-          .maybeSingle();
+      final isAvailable = await supabase.rpc<bool>(
+        'is_username_available',
+        params: {'p_username': username, 'p_exclude_user_id': currentUser.id},
+      );
 
-      if (existing != null) {
+      if (!isAvailable) {
         setState(() {
           _error = 'Ce pseudo est déjà pris.';
         });
@@ -3594,11 +3583,20 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
         stackTrace,
         reason: 'profile_update_failed',
       );
+      final isUsernameConflict =
+          error is PostgrestException &&
+          (error.code == '23505' ||
+              error.message.toLowerCase().contains(
+                'users_username_lower_unique_idx',
+              ) ||
+              error.message.toLowerCase().contains('duplicate key'));
       setState(() {
-        _error = AppTelemetryService.userMessageForError(
-          error,
-          fallback: 'Impossible de modifier le profil.',
-        );
+        _error = isUsernameConflict
+            ? 'Ce pseudo est déjà pris.'
+            : AppTelemetryService.userMessageForError(
+                error,
+                fallback: 'Impossible de modifier le profil.',
+              );
       });
     } finally {
       if (mounted) {

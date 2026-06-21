@@ -150,7 +150,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           loading: () => _lastContests == null
               ? const _HomeHeaderShimmer()
               : const _HomeHeaderFallback(),
-          error: (error, stackTrace) => const _HomeHeaderError(),
+          error: (error, stackTrace) => const _HomeHeaderFallback(),
         ),
       ),
       body: Stack(
@@ -2679,20 +2679,6 @@ class _HomeHeaderFallback extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _HomeHeaderError extends StatelessWidget {
-  const _HomeHeaderError();
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Text(
-        'Impossible de charger ton profil.',
-        style: AppTextStyles.bodySecondary,
-      ),
     );
   }
 }

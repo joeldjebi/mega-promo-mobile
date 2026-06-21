@@ -27,9 +27,11 @@ class NativeSocialAuthService {
 
   static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   static Future<void>? _googleInitialization;
-  static final String _googleRawNonce = Supabase.instance.client.auth
+  static final String _googleIosRawNonce = Supabase.instance.client.auth
       .generateRawNonce();
-  static final String _googleHashedNonce = _sha256String(_googleRawNonce);
+  static final String _googleIosHashedNonce = _sha256String(
+    _googleIosRawNonce,
+  );
 
   static Future<AuthResponse> signIn(NativeSocialProvider provider) {
     return switch (provider) {
@@ -54,6 +56,15 @@ class NativeSocialAuthService {
       idToken: token.idToken,
       accessToken: token.accessToken,
       nonce: token.rawNonce,
+    );
+  }
+
+  static Future<bool> signInWithGoogleOAuth() {
+    return Supabase.instance.client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: 'megapromo://login-callback/',
+      authScreenLaunchMode: LaunchMode.externalApplication,
+      queryParams: const {'prompt': 'select_account'},
     );
   }
 
@@ -111,10 +122,17 @@ class NativeSocialAuthService {
       );
     }
 
+    final rawNonce = Platform.isIOS || Platform.isMacOS
+        ? _googleIosRawNonce
+        : null;
+    final hashedNonce = Platform.isIOS || Platform.isMacOS
+        ? _googleIosHashedNonce
+        : null;
+
     _googleInitialization ??= _googleSignIn.initialize(
       clientId: Platform.isIOS ? kGoogleIosClientId : null,
       serverClientId: kGoogleWebClientId,
-      nonce: _googleHashedNonce,
+      nonce: hashedNonce,
     );
     await _googleInitialization;
 
@@ -122,12 +140,21 @@ class NativeSocialAuthService {
       'hasWebClientId': kGoogleWebClientId.trim().isNotEmpty,
       'hasIosClientId': kGoogleIosClientId.trim().isNotEmpty,
       'platform': Platform.operatingSystem,
-      'hasNonce': true,
+      'hasNonce': rawNonce != null,
     });
 
-    await _googleSignIn.signOut();
+    if (Platform.isIOS || Platform.isMacOS) {
+      await _googleSignIn.signOut();
+    }
 
-    final account = await _googleSignIn.authenticate();
+    final account = await _googleSignIn.authenticate().timeout(
+      const Duration(seconds: 45),
+      onTimeout: () {
+        throw const AuthException(
+          'Google ne répond pas. Ferme la fenêtre Google puis réessaie.',
+        );
+      },
+    );
     final authentication = account.authentication;
     final authorization = await account.authorizationClient
         .authorizationForScopes(const <String>[]);
@@ -143,13 +170,13 @@ class NativeSocialAuthService {
       'hasIdToken': true,
       'hasAccessToken': authorization?.accessToken != null,
       'idTokenHasNonce': tokenNonce != null,
-      'idTokenNonceMatchesLocalHash': tokenNonce == _googleHashedNonce,
+      'idTokenNonceMatchesLocalHash': tokenNonce == hashedNonce,
     });
 
     return _NativeSocialToken(
       idToken: idToken,
       accessToken: authorization?.accessToken,
-      rawNonce: _googleRawNonce,
+      rawNonce: rawNonce,
     );
   }
 
@@ -193,6 +220,10 @@ class NativeSocialAuthService {
     return _NativeSocialToken(idToken: idToken, rawNonce: rawNonce);
   }
 
+  static String _sha256String(String value) {
+    return sha256.convert(utf8.encode(value)).toString();
+  }
+
   static String? _jwtPayloadStringValue(String token, String key) {
     final parts = token.split('.');
     if (parts.length < 2) return null;
@@ -209,10 +240,6 @@ class NativeSocialAuthService {
     } catch (_) {
       return null;
     }
-  }
-
-  static String _sha256String(String value) {
-    return sha256.convert(utf8.encode(value)).toString();
   }
 }
 
