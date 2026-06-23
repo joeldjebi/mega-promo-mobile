@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,6 +12,7 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../config/app_store_review_mode.dart';
@@ -69,7 +72,9 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(appFeatureFlagsProvider);
+    final featureFlags =
+        ref.watch(appFeatureFlagsProvider).asData?.value ??
+        AppFeatureFlags.defaults.appStoreSafe();
     final userId = ref.watch(authStateProvider).value?.id;
     _syncRealtimeRefresh(userId);
 
@@ -83,7 +88,10 @@ class _ContestDetailScreenState extends ConsumerState<ContestDetailScreen>
             return const _CampaignUnavailableForStore();
           }
           _preloadContestAssets(data.contest);
-          return _ContestDetailBody(data: data);
+          return _ContestDetailBody(
+            data: data,
+            quizRulesContent: featureFlags.quizRulesContent,
+          );
         },
         loading: () => const _ContestDetailShimmer(),
         error: (error, stackTrace) => _ContestDetailError(
@@ -359,8 +367,12 @@ class _CampaignUnavailableForStore extends StatelessWidget {
 
 class _ContestDetailBody extends ConsumerStatefulWidget {
   final ContestDetailData data;
+  final QuizRulesContent quizRulesContent;
 
-  const _ContestDetailBody({required this.data});
+  const _ContestDetailBody({
+    required this.data,
+    required this.quizRulesContent,
+  });
 
   @override
   ConsumerState<_ContestDetailBody> createState() => _ContestDetailBodyState();
@@ -371,6 +383,20 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
   bool _isSubscriptionNavigationRunning = false;
 
   ContestDetailData get data => widget.data;
+
+  QuizRulesText? get _quizRulesText {
+    if (data.contest.isLive) return widget.quizRulesContent.ql;
+    if (data.contest.type == ContestType.quiz) {
+      return widget.quizRulesContent.jcq;
+    }
+    return null;
+  }
+
+  String? get _quizRulesType {
+    if (data.contest.isLive) return 'ql';
+    if (data.contest.type == ContestType.quiz) return 'jcq';
+    return null;
+  }
 
   bool get _dailyLimitReached =>
       data.userProfile.participationsToday >=
@@ -529,6 +555,31 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
 
   Future<void> _participate(BuildContext context) async {
     if (_isActionRunning) return;
+    if (!_planAccessDenied && !data.hasParticipated) {
+      final shouldConfirmRules =
+          data.contest.type == ContestType.quiz &&
+          (!data.contest.isLive ||
+              !data.hasLiveRegistration ||
+              _canStartLiveQuiz);
+      final rulesText = _quizRulesText;
+      final rulesType = _quizRulesType;
+      if (shouldConfirmRules &&
+          rulesText != null &&
+          rulesType != null &&
+          await _shouldShowQuizRulesPopup(rulesType, rulesText)) {
+        if (!mounted) return;
+        final decision = await _showQuizRulesSheet(this.context, rulesText);
+        final accepted = decision?.accepted ?? false;
+        if (!accepted) return;
+        await _recordQuizRulesPopupDecision(
+          rulesType,
+          dontShowAgain: decision?.dontShowAgain ?? false,
+        );
+        if (!mounted || !context.mounted) return;
+      }
+    }
+    if (!mounted) return;
+    final actionContext = this.context;
     setState(() => _isActionRunning = true);
 
     Future<void> stopLoading() async {
@@ -536,7 +587,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
 
     if (_planAccessDenied) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(actionContext).showSnackBar(
         SnackBar(
           content: Text(
             'Ce quiz est réservé aux joueurs ${data.contest.accessLabel}.',
@@ -549,7 +600,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
 
     if (data.contest.isLive) {
       if (!data.contest.isLiveReady) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(actionContext).showSnackBar(
           const SnackBar(
             content: Text('L’arène du Quiz Live se prépare. Reviens vite.'),
           ),
@@ -559,7 +610,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       }
 
       if (data.contest.isLiveEnded) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(actionContext).showSnackBar(
           const SnackBar(content: Text('Ce Quiz Live est terminé.')),
         );
         await stopLoading();
@@ -567,7 +618,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       }
 
       if (!data.contest.isLiveReservationOpen) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(actionContext).showSnackBar(
           SnackBar(
             content: Text(
               data.contest.isLiveQueued
@@ -580,7 +631,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         return;
       }
 
-      final messenger = ScaffoldMessenger.of(context);
+      final messenger = ScaffoldMessenger.of(actionContext);
       if (!await NetworkStatusService.instance.ensureOnline()) {
         if (mounted) {
           messenger.showSnackBar(
@@ -633,8 +684,8 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             );
           }
           _refreshParticipationState(ref);
-          if (!context.mounted) return;
-          context.go('/contests/${data.contest.id}/live-waiting');
+          if (!actionContext.mounted) return;
+          actionContext.go('/contests/${data.contest.id}/live-waiting');
           return;
         }
 
@@ -654,16 +705,16 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             ),
           );
           _refreshParticipationState(ref);
-          if (!context.mounted) return;
-          context.go('/contests/${data.contest.id}/live-waiting');
+          if (!actionContext.mounted) return;
+          actionContext.go('/contests/${data.contest.id}/live-waiting');
           return;
         }
 
         if (_canStartLiveQuiz) {
           final result = await startLiveQuizParticipation(data: data);
           _refreshParticipationState(ref);
-          if (!context.mounted) return;
-          context.go(
+          if (!actionContext.mounted) return;
+          actionContext.go(
             '/contests/${data.contest.id}/quiz',
             extra: {'participationId': result.participationId},
           );
@@ -700,7 +751,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             context: {'contest_id': data.contest.id},
           ),
         );
-        if (!context.mounted) return;
+        if (!actionContext.mounted) return;
         final message = _formatLiveQuizError(error);
         ScaffoldMessenger.of(
           context,
@@ -757,8 +808,8 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         );
 
         _refreshParticipationState(ref);
-        if (!context.mounted) return;
-        context.go(
+        if (!actionContext.mounted) return;
+        actionContext.go(
           '/contests/${data.contest.id}/quiz',
           extra: {'participationId': participationId},
         );
@@ -774,8 +825,8 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             stackTrace: stackTrace,
           ),
         );
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (!actionContext.mounted) return;
+        ScaffoldMessenger.of(actionContext).showSnackBar(
           const SnackBar(
             content: Text('Participation déjà enregistrée pour ce quiz.'),
           ),
@@ -788,8 +839,9 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
 
     if (data.contest.type == ContestType.pronostic) {
+      if (!mounted) return;
       await showModalBottomSheet<void>(
-        context: this.context,
+        context: actionContext,
         isScrollControlled: true,
         backgroundColor: AppColors.surface,
         shape: const RoundedRectangleBorder(
@@ -802,8 +854,9 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       return;
     }
 
+    if (!mounted) return;
     await showModalBottomSheet<void>(
-      context: this.context,
+      context: actionContext,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
@@ -812,6 +865,48 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       builder: (context) => _DrawParticipationSheet(data: data, ref: ref),
     );
     await stopLoading();
+  }
+
+  Future<bool> _shouldShowQuizRulesPopup(
+    String rulesType,
+    QuizRulesText rulesText,
+  ) async {
+    if (!rulesText.enabled || rulesText.showCount <= 0) return false;
+    final userId = ref.read(currentUserIdProvider) ?? 'anonymous';
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = 'quiz_rules_popup::$userId::$rulesType';
+    if (prefs.getBool('$prefix::dismissed') ?? false) return false;
+    final seenCount = prefs.getInt('$prefix::seen_count') ?? 0;
+    return seenCount < rulesText.showCount;
+  }
+
+  Future<void> _recordQuizRulesPopupDecision(
+    String rulesType, {
+    required bool dontShowAgain,
+  }) async {
+    final userId = ref.read(currentUserIdProvider) ?? 'anonymous';
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = 'quiz_rules_popup::$userId::$rulesType';
+    final seenCount = prefs.getInt('$prefix::seen_count') ?? 0;
+    await prefs.setInt('$prefix::seen_count', seenCount + 1);
+    if (dontShowAgain) {
+      await prefs.setBool('$prefix::dismissed', true);
+    }
+  }
+
+  Future<_QuizRulesDecision?> _showQuizRulesSheet(
+    BuildContext context,
+    QuizRulesText rulesText,
+  ) async {
+    return showModalBottomSheet<_QuizRulesDecision>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _QuizRulesBottomSheet(rulesText: rulesText),
+    );
   }
 
   @override
@@ -1093,6 +1188,144 @@ class _EndedLiveQuizDetail extends StatelessWidget {
             AppButton(
               text: 'Retour à l’accueil',
               onPressed: () => context.go('/home'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuizRulesDecision {
+  final bool accepted;
+  final bool dontShowAgain;
+
+  const _QuizRulesDecision({
+    required this.accepted,
+    required this.dontShowAgain,
+  });
+}
+
+class _QuizRulesBottomSheet extends StatefulWidget {
+  final QuizRulesText rulesText;
+
+  const _QuizRulesBottomSheet({required this.rulesText});
+
+  @override
+  State<_QuizRulesBottomSheet> createState() => _QuizRulesBottomSheetState();
+}
+
+class _QuizRulesBottomSheetState extends State<_QuizRulesBottomSheet> {
+  bool _dontShowAgain = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final rulesText = widget.rulesText;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          14,
+          20,
+          20 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceBorder,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              rulesText.title,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.h2.copyWith(fontSize: 20),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              rulesText.objective,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.bodySecondary.copyWith(height: 1.35),
+            ),
+            const SizedBox(height: 18),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.34,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: rulesText.rules
+                      .map(
+                        (rule) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.check_circle_rounded,
+                                color: AppColors.accentGreen,
+                                size: 19,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  rule,
+                                  style: AppTextStyles.body.copyWith(
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            CheckboxListTile(
+              value: _dontShowAgain,
+              onChanged: (value) =>
+                  setState(() => _dontShowAgain = value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: AppColors.primary,
+              title: Text(
+                'J’ai compris, ne plus afficher',
+                style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                'Tu pourras toujours participer normalement.',
+                style: AppTextStyles.bodySmall,
+              ),
+            ),
+            const SizedBox(height: 10),
+            AppButton(
+              text: 'J’ai compris',
+              onPressed: () => Navigator.of(context).pop(
+                _QuizRulesDecision(
+                  accepted: true,
+                  dontShowAgain: _dontShowAgain,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            AppButton(
+              text: 'Annuler',
+              isOutlined: true,
+              onPressed: () => Navigator.of(context).pop(
+                const _QuizRulesDecision(accepted: false, dontShowAgain: false),
+              ),
             ),
           ],
         ),
