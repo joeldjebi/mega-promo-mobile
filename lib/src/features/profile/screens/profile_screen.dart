@@ -11,11 +11,14 @@ import 'package:mega_promo/core/widgets/app_button.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/fcm_service.dart';
+import '../../app_update/services/app_update_service.dart';
 import '../../auth/services/native_social_auth_service.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
@@ -406,7 +409,7 @@ class _CompactProfilePage extends StatelessWidget {
                 _ProfileStatsStrip(data: data, isCompact: isCompact),
                 SizedBox(height: isCompact ? 10 : 14),
                 SizedBox(
-                  height: isCompact ? 278 : 318,
+                  height: isCompact ? 370 : 420,
                   child: _ProfileActionPanel(
                     data: data,
                     showPlansAction: showPlansAction,
@@ -429,10 +432,7 @@ class _CompactProfilePage extends StatelessWidget {
                   width: double.infinity,
                   height: isCompact ? 42 : 46,
                   child: TextButton.icon(
-                    onPressed: () async {
-                      await Supabase.instance.client.auth.signOut();
-                      if (context.mounted) context.go('/login');
-                    },
+                    onPressed: () => _confirmLogout(context),
                     icon: const Icon(Icons.logout_rounded, size: 18),
                     label: const Text('Se déconnecter'),
                     style: TextButton.styleFrom(
@@ -452,6 +452,37 @@ class _CompactProfilePage extends StatelessWidget {
       },
     );
   }
+}
+
+Future<void> _confirmLogout(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      title: const Text('Se déconnecter ?'),
+      content: const Text(
+        'Tu devras te reconnecter pour accéder à ton profil, tes participations et tes récompenses.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.accentRed,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Se déconnecter'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true || !context.mounted) return;
+  await Supabase.instance.client.auth.signOut();
+  if (context.mounted) context.go('/login');
 }
 
 class _ProfileFooter extends StatelessWidget {
@@ -1503,6 +1534,18 @@ class _ProfileActionPanel extends StatelessWidget {
           subtitle: 'Coordonnées',
           onTap: () => _showPaymentMethodsSheet(context),
         ),
+      _ProfileAction(
+        icon: Icons.support_agent_rounded,
+        title: 'Service client',
+        subtitle: 'WhatsApp ou mail',
+        onTap: () => _showCustomerSupportSheet(context),
+      ),
+      _ProfileAction(
+        icon: Icons.ios_share_rounded,
+        title: 'Partager',
+        subtitle: 'Inviter un proche',
+        onTap: () => _shareMegaPromoApp(context),
+      ),
     ];
 
     final actionRows = <List<_ProfileAction>>[];
@@ -1573,6 +1616,14 @@ class _ProfileActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNotificationTile = action.isNotificationToggle;
+    final tilePadding = isNotificationTile
+        ? EdgeInsets.symmetric(
+            horizontal: isCompact ? 8 : 10,
+            vertical: isCompact ? 6 : 8,
+          )
+        : EdgeInsets.all(isCompact ? 9 : 12);
+
     return Material(
       color: const Color(0xFFF6F7FA),
       borderRadius: BorderRadius.circular(20),
@@ -1580,7 +1631,7 @@ class _ProfileActionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         onTap: action.onTap,
         child: Padding(
-          padding: EdgeInsets.all(isCompact ? 9 : 12),
+          padding: tilePadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1619,7 +1670,11 @@ class _ProfileActionTile extends StatelessWidget {
                     _NotificationToggle(isCompact: isCompact),
                 ],
               ),
-              SizedBox(height: isCompact ? 5 : 7),
+              SizedBox(
+                height: isNotificationTile
+                    ? (isCompact ? 2 : 3)
+                    : (isCompact ? 5 : 7),
+              ),
               action.isNotificationToggle
                   ? _NotificationStatusText(isCompact: isCompact)
                   : Text(
@@ -1632,6 +1687,282 @@ class _ProfileActionTile extends StatelessWidget {
                         height: 1.05,
                       ),
                     ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerSupportContact {
+  final String whatsappNumber;
+  final String whatsappMessage;
+  final String email;
+
+  const _CustomerSupportContact({
+    required this.whatsappNumber,
+    required this.whatsappMessage,
+    required this.email,
+  });
+
+  bool get hasWhatsapp => whatsappNumber.trim().isNotEmpty;
+  bool get hasEmail => email.trim().isNotEmpty;
+
+  static const fallback = _CustomerSupportContact(
+    whatsappNumber: '',
+    whatsappMessage: 'Bonjour MegaPromo, j’ai besoin d’aide.',
+    email: 'contact@megapromo.ci',
+  );
+}
+
+Future<_CustomerSupportContact> _loadCustomerSupportContact() async {
+  try {
+    final row = await Supabase.instance.client
+        .from('landing_contact_settings')
+        .select('whatsapp_number, whatsapp_message, email')
+        .eq('key', 'main')
+        .maybeSingle();
+
+    if (row == null) return _CustomerSupportContact.fallback;
+    final whatsappNumber = (row['whatsapp_number'] as String? ?? '').trim();
+    final whatsappMessage = (row['whatsapp_message'] as String? ?? '').trim();
+    final email = (row['email'] as String? ?? '').trim();
+    return _CustomerSupportContact(
+      whatsappNumber: whatsappNumber,
+      whatsappMessage: whatsappMessage.isEmpty
+          ? _CustomerSupportContact.fallback.whatsappMessage
+          : whatsappMessage,
+      email: email.isEmpty ? _CustomerSupportContact.fallback.email : email,
+    );
+  } catch (_) {
+    return _CustomerSupportContact.fallback;
+  }
+}
+
+Future<void> _showCustomerSupportSheet(BuildContext context) async {
+  final contact = await _loadCustomerSupportContact();
+  if (!context.mounted) return;
+
+  await showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+    ),
+    builder: (sheetContext) {
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceBorder,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Contacter le service client',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.h2.copyWith(fontSize: 20),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Choisis le canal qui te convient. L’équipe MegaPromo te répondra dès que possible.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySecondary.copyWith(height: 1.35),
+              ),
+              const SizedBox(height: 18),
+              _SupportOptionTile(
+                icon: Icons.chat_rounded,
+                title: 'WhatsApp',
+                subtitle: contact.hasWhatsapp
+                    ? 'Discuter avec le service client'
+                    : 'Numéro WhatsApp indisponible',
+                color: const Color(0xFF25D366),
+                enabled: contact.hasWhatsapp,
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  await _openSupportWhatsApp(context, contact);
+                },
+              ),
+              const SizedBox(height: 10),
+              _SupportOptionTile(
+                icon: Icons.mail_rounded,
+                title: 'Mail',
+                subtitle: contact.hasEmail
+                    ? contact.email
+                    : 'Adresse mail indisponible',
+                color: AppColors.primary,
+                enabled: contact.hasEmail,
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  await _openSupportMail(context, contact);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _openSupportWhatsApp(
+  BuildContext context,
+  _CustomerSupportContact contact,
+) async {
+  final phone = contact.whatsappNumber.replaceAll(RegExp(r'[^0-9]'), '');
+  if (phone.isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Numéro WhatsApp indisponible.')),
+      );
+    }
+    return;
+  }
+
+  final uri = Uri.https('wa.me', '/$phone', {'text': contact.whatsappMessage});
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Impossible d’ouvrir WhatsApp.')),
+    );
+  }
+}
+
+Future<void> _openSupportMail(
+  BuildContext context,
+  _CustomerSupportContact contact,
+) async {
+  final email = contact.email.trim();
+  if (email.isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Adresse mail indisponible.')),
+      );
+    }
+    return;
+  }
+
+  final uri = Uri(
+    scheme: 'mailto',
+    path: email,
+    queryParameters: {
+      'subject': 'Support MegaPromo',
+      'body': 'Bonjour MegaPromo,\n\nJ’ai besoin d’aide concernant mon compte.',
+    },
+  );
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Impossible d’ouvrir l’application mail.')),
+    );
+  }
+}
+
+Future<void> _shareMegaPromoApp(BuildContext context) async {
+  final storeUrl = AppUpdateService.platformStoreUrl();
+  final appUrl = storeUrl.trim().isEmpty
+      ? 'https://megapromo.app/app'
+      : storeUrl;
+  final text =
+      '''Découvre Mega Promo, l’app pour jouer aux quiz, participer aux concours et tenter de gagner des récompenses.
+
+Télécharge l’app ici : $appUrl''';
+
+  try {
+    await SharePlus.instance.share(ShareParams(text: text));
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Partage indisponible pour le moment.')),
+      );
+    }
+  }
+}
+
+class _SupportOptionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _SupportOptionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: enabled ? const Color(0xFFF6F7FA) : const Color(0xFFF1F2F5),
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: enabled ? 0.12 : 0.06),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  icon,
+                  color: enabled ? color : AppColors.textHint,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTextStyles.h3.copyWith(
+                        color: enabled
+                            ? AppColors.textPrimary
+                            : AppColors.textHint,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textHint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: enabled ? AppColors.textHint : AppColors.surfaceBorder,
+              ),
             ],
           ),
         ),
@@ -1659,48 +1990,52 @@ class _NotificationToggleState extends ConsumerState<_NotificationToggle> {
         .watch(pushNotificationsEnabledProvider)
         .maybeWhen(data: (value) => value, orElse: () => false);
 
-    return Transform.scale(
-      scale: widget.isCompact ? 0.72 : 0.78,
-      child: Switch.adaptive(
-        value: enabled,
-        activeThumbColor: AppColors.primary,
-        activeTrackColor: AppColors.primary.withValues(alpha: 0.28),
-        onChanged: _isSaving
-            ? null
-            : (value) async {
-                setState(() => _isSaving = true);
-                try {
-                  final isEnabled =
-                      await FcmService.setPushNotificationsEnabled(value);
-                  ref.invalidate(pushNotificationsEnabledProvider);
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        isEnabled
-                            ? 'Notifications activées.'
-                            : 'Notifications désactivées.',
+    return SizedBox(
+      width: widget.isCompact ? 40 : 44,
+      height: widget.isCompact ? 28 : 30,
+      child: FittedBox(
+        fit: BoxFit.contain,
+        child: Switch.adaptive(
+          value: enabled,
+          activeThumbColor: AppColors.primary,
+          activeTrackColor: AppColors.primary.withValues(alpha: 0.28),
+          onChanged: _isSaving
+              ? null
+              : (value) async {
+                  setState(() => _isSaving = true);
+                  try {
+                    final isEnabled =
+                        await FcmService.setPushNotificationsEnabled(value);
+                    ref.invalidate(pushNotificationsEnabledProvider);
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          isEnabled
+                              ? 'Notifications activées.'
+                              : 'Notifications désactivées.',
+                        ),
                       ),
-                    ),
-                  );
-                } catch (error, stackTrace) {
-                  await AppTelemetryService.recordError(
-                    error,
-                    stackTrace,
-                    reason: 'profile_push_toggle_failed',
-                  );
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Impossible de modifier les notifications.',
+                    );
+                  } catch (error, stackTrace) {
+                    await AppTelemetryService.recordError(
+                      error,
+                      stackTrace,
+                      reason: 'profile_push_toggle_failed',
+                    );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Impossible de modifier les notifications.',
+                        ),
                       ),
-                    ),
-                  );
-                } finally {
-                  if (mounted) setState(() => _isSaving = false);
-                }
-              },
+                    );
+                  } finally {
+                    if (mounted) setState(() => _isSaving = false);
+                  }
+                },
+        ),
       ),
     );
   }
@@ -2722,461 +3057,6 @@ class _NativeSelectField extends StatelessWidget {
   }
 }
 
-class _ProfileHeader extends StatelessWidget {
-  final ProfileData data;
-  final VoidCallback onEdit;
-
-  const _ProfileHeader({required this.data, required this.onEdit});
-
-  @override
-  Widget build(BuildContext context) {
-    final avatar = avatarForId(data.user.avatarUrl);
-    final statusLabel = data.user.isPremium ? 'Premium' : 'Standard';
-    final showStatusPill =
-        data.user.planName.trim().toLowerCase() != statusLabel.toLowerCase();
-
-    return Column(
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 106,
-              height: 106,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: avatar.color.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: avatar.color.withValues(alpha: 0.5),
-                  width: 1.4,
-                ),
-              ),
-              child: Icon(avatar.icon, color: avatar.color, size: 48),
-            ),
-            Positioned(
-              right: -4,
-              bottom: 4,
-              child: Material(
-                color: Colors.white,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: onEdit,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.surfaceBorder),
-                    ),
-                    child: const Icon(
-                      Icons.edit_rounded,
-                      color: AppColors.textSecondary,
-                      size: 18,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Text(
-          data.user.username,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.h1.copyWith(
-            color: AppColors.textPrimary,
-            fontSize: 25,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          data.user.phone ?? 'Joueur MegaPromo',
-          textAlign: TextAlign.center,
-          style: AppTextStyles.bodySecondary.copyWith(fontSize: 16),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 10,
-          runSpacing: 8,
-          children: [
-            _ProfileHeaderPill(text: data.user.planName),
-            if (showStatusPill) _ProfileHeaderPill(text: statusLabel),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ProfileHeaderPill extends StatelessWidget {
-  final String text;
-
-  const _ProfileHeaderPill({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: AppTextStyles.h3.copyWith(
-        fontWeight: FontWeight.w600,
-        color: AppColors.textPrimary,
-      ),
-    );
-  }
-}
-
-class _ProfileMenuGroup extends StatelessWidget {
-  final List<_ProfileMenuItem> children;
-
-  const _ProfileMenuGroup({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-      ),
-      child: Column(
-        children: [
-          for (var index = 0; index < children.length; index++) ...[
-            children[index],
-            if (index != children.length - 1)
-              Padding(
-                padding: const EdgeInsets.only(left: 78, right: 24),
-                child: Container(height: 1, color: const Color(0xFFE8E9EE)),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileMenuItem extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final String? trailingText;
-  final VoidCallback? onTap;
-  final bool destructive;
-
-  const _ProfileMenuItem({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.trailingText,
-    this.onTap,
-    this.destructive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = destructive
-        ? AppColors.accentRed
-        : AppColors.textPrimary;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(30),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 17, 18, 17),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0F1F4),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(
-                  icon,
-                  color: destructive
-                      ? AppColors.accentRed
-                      : AppColors.textSecondary,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.h3.copyWith(
-                        color: foreground,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 19,
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textHint,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (trailingText != null)
-                Text(
-                  trailingText!,
-                  style: AppTextStyles.h3.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                )
-              else if (onTap != null)
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: Color(0xFFC2C4CA),
-                  size: 31,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  final bool isPremium;
-
-  const _StatusBadge({required this.isPremium});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: (isPremium ? AppColors.gold : AppColors.primaryLight).withValues(
-          alpha: 0.16,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: (isPremium ? AppColors.gold : AppColors.primaryLight)
-              .withValues(alpha: 0.40),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isPremium
-                ? Icons.workspace_premium_rounded
-                : Icons.verified_user_rounded,
-            color: isPremium ? AppColors.gold : AppColors.primaryLight,
-            size: 15,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            isPremium ? 'Premium' : 'Joueur vérifié',
-            style: AppTextStyles.bodySmall.copyWith(
-              color: isPremium ? AppColors.gold : AppColors.primaryLight,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatsPanel extends StatelessWidget {
-  final ProfileData data;
-
-  const _StatsPanel({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
-      child: Row(
-        children: [
-          Expanded(
-            child: _StatTile(
-              icon: Icons.bolt_rounded,
-              label: 'Points',
-              value: '${data.user.pointsTotal}',
-            ),
-          ),
-          const _Divider(),
-          Expanded(
-            child: _StatTile(
-              icon: Icons.confirmation_number_rounded,
-              label: 'Participations',
-              value: '${data.participations.length}',
-            ),
-          ),
-          const _Divider(),
-          Expanded(
-            child: _StatTile(
-              icon: Icons.card_giftcard_rounded,
-              label: 'Récompenses',
-              value: '${data.wins.length}',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _StatTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, color: AppColors.primaryLight, size: 20),
-        const SizedBox(height: 8),
-        Text(value, style: AppTextStyles.price),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.bodySmall,
-        ),
-      ],
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  const _Divider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 1, height: 58, color: AppColors.surfaceBorder);
-  }
-}
-
-class _BadgesSection extends StatelessWidget {
-  final List<Map<String, dynamic>> badges;
-
-  const _BadgesSection({required this.badges});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Section(
-      title: 'Mes badges',
-      icon: Icons.military_tech_rounded,
-      child: SizedBox(
-        height: 96,
-        child: badges.isEmpty
-            ? _EmptyInline(
-                icon: Icons.military_tech_rounded,
-                text: 'Aucun badge débloqué',
-              )
-            : ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: badges.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final badge =
-                      badges[index]['badges'] as Map<String, dynamic>?;
-                  return _BadgeCard(name: badge?['name'] as String? ?? 'Badge');
-                },
-              ),
-      ),
-    );
-  }
-}
-
-class _BadgeCard extends StatelessWidget {
-  final String name;
-
-  const _BadgeCard({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 112,
-      child: AppCard(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.military_tech_rounded, color: AppColors.gold),
-            const SizedBox(height: 8),
-            Text(
-              name,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActivitySection extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final List<Map<String, dynamic>> rows;
-  final String empty;
-  final VoidCallback? onViewAll;
-
-  const _ActivitySection({
-    required this.title,
-    required this.icon,
-    required this.rows,
-    required this.empty,
-    this.onViewAll,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _Section(
-      title: title,
-      icon: icon,
-      trailing: rows.isEmpty || onViewAll == null
-          ? null
-          : TextButton(onPressed: onViewAll, child: const Text('Voir tout')),
-      child: rows.isEmpty
-          ? _EmptyInline(icon: icon, text: empty)
-          : Column(
-              children: rows.take(5).map((row) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _ActivityRow(row: row, icon: icon),
-                );
-              }).toList(),
-            ),
-    );
-  }
-}
-
 class _ActivityRow extends StatelessWidget {
   final Map<String, dynamic> row;
   final IconData icon;
@@ -3242,39 +3122,6 @@ class _ActivityRow extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final Widget child;
-  final Widget? trailing;
-
-  const _Section({
-    required this.title,
-    required this.icon,
-    required this.child,
-    this.trailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: AppColors.primaryLight, size: 20),
-            const SizedBox(width: 9),
-            Expanded(child: Text(title, style: AppTextStyles.h2)),
-            ?trailing,
-          ],
-        ),
-        const SizedBox(height: 12),
-        child,
-      ],
     );
   }
 }
