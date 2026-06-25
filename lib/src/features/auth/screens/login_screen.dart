@@ -30,6 +30,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   static const _phoneDigitsLength = 10;
 
   final TextEditingController _phoneController = TextEditingController();
+  final FocusNode _phoneFocusNode = FocusNode();
   late final AnimationController _backgroundController;
   bool _isLoading = false;
   NativeSocialProvider? _loadingSocialProvider;
@@ -47,16 +48,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       duration: const Duration(seconds: 11),
     )..repeat();
     _phoneController.addListener(() => setState(() {}));
+    _phoneFocusNode.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _backgroundController.dispose();
     _phoneController.dispose();
+    _phoneFocusNode.dispose();
     super.dispose();
   }
 
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   Future<void> _continue() async {
+    _dismissKeyboard();
+
     final digits = _phoneDigits;
     final phone = '+225$digits';
 
@@ -128,6 +137,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   Future<void> _continueWithSocial(NativeSocialProvider provider) async {
+    _dismissKeyboard();
+
     setState(() => _loadingSocialProvider = provider);
 
     final providerLabel = _socialProviderLabel(provider);
@@ -239,212 +250,298 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ? 'Connecte-toi rapidement ou utilise ton numéro'
         : 'Connecte-toi avec ton numéro de téléphone';
 
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final isPhoneKeyboardActive =
+        showOtpAuth && bottomInset > 0 && _phoneFocusNode.hasFocus;
+    final logoSize = isPhoneKeyboardActive ? 48.0 : 82.0;
+    final topPadding = isPhoneKeyboardActive ? 8.0 : 32.0;
+    final showSocialOptions = showSocialAuth;
+    final contentBottomPadding = isPhoneKeyboardActive ? bottomInset : 96.0;
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _LoginPromoWatermark(animation: _backgroundController),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Spacer(),
-                  Center(
-                    child: Image.asset(
-                      'assets/logo/megapromologo.png',
-                      width: 82,
-                      height: 82,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
+      resizeToAvoidBottomInset: false,
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _dismissKeyboard,
+        child: SafeArea(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _LoginPromoWatermark(animation: _backgroundController),
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  24,
+                  topPadding,
+                  24,
+                  contentBottomPadding,
+                ),
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  offset: isPhoneKeyboardActive
+                      ? const Offset(0, -0.025)
+                      : Offset.zero,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Flexible(
-                        child: Text('Bienvenue', style: AppTextStyles.h1),
-                      ),
-                      const SizedBox(width: 10),
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppColors.primary.withValues(alpha: 0.18),
+                      Center(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          width: logoSize,
+                          height: logoSize,
+                          child: Image.asset(
+                            'assets/logo/megapromologo.png',
+                            fit: BoxFit.contain,
                           ),
                         ),
-                        child: const Icon(
-                          Icons.waving_hand_rounded,
-                          color: AppColors.primary,
-                          size: 19,
-                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(loginSubtitle, style: AppTextStyles.bodySecondary),
-                  const SizedBox(height: 34),
-                  if (showSocialAuth) ...[
-                    _OAuthButton(
-                      label: 'Continuer avec Google',
-                      icon: Icons.g_mobiledata_rounded,
-                      leading: const _GoogleLogoMark(size: 22),
-                      isLoading:
-                          _loadingSocialProvider == NativeSocialProvider.google,
-                      onPressed: _isBusy
-                          ? null
-                          : () => _continueWithSocial(
-                              NativeSocialProvider.google,
-                            ),
-                    ),
-                    if (showAppleAuth) ...[
-                      const SizedBox(height: 12),
-                      _OAuthButton(
-                        label: 'Continuer avec Apple',
-                        icon: Icons.apple_rounded,
-                        isLoading:
-                            _loadingSocialProvider ==
-                            NativeSocialProvider.apple,
-                        onPressed: _isBusy
-                            ? null
-                            : () => _continueWithSocial(
-                                NativeSocialProvider.apple,
-                              ),
-                      ),
-                    ],
-                  ],
-                  if (showSocialAuth && showOtpAuth) ...[
-                    const SizedBox(height: 22),
-                    const _AuthDivider(label: 'ou avec un code OTP'),
-                    const SizedBox(height: 22),
-                  ],
-                  if (showOtpAuth) ...[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          height: 58,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceElevated,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.surfaceBorder),
+                      SizedBox(height: isPhoneKeyboardActive ? 8 : 20),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text('Bienvenue', style: AppTextStyles.h1),
                           ),
-                          child: Center(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const _CoteDIvoireFlag(),
-                                const SizedBox(width: 9),
-                                Text(
-                                  '+225',
-                                  style: AppTextStyles.body.copyWith(height: 1),
+                          const SizedBox(width: 10),
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.18,
                                 ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: _phoneController,
-                            enabled: !_isBusy,
-                            keyboardType: TextInputType.number,
-                            textInputAction: TextInputAction.done,
-                            inputFormatters: [
-                              _PhoneNumberInputFormatter(
-                                maxDigits: _phoneDigitsLength,
-                              ),
-                            ],
-                            style: AppTextStyles.body,
-                            decoration: const InputDecoration(
-                              hintText: 'Numéro de téléphone',
-                              prefixIcon: Icon(
-                                Icons.phone_iphone_rounded,
-                                size: 19,
                               ),
                             ),
-                            onSubmitted: (_) {
-                              if (_hasValidPhone && !_isBusy) {
-                                _continue();
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          channelIcon,
-                          color: AppColors.accentGreen,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Tu recevras ton code OTP par $channelLabel sur ce numéro.',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
-                              height: 1.35,
+                            child: const Icon(
+                              Icons.waving_hand_rounded,
+                              color: AppColors.primary,
+                              size: 19,
                             ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(loginSubtitle, style: AppTextStyles.bodySecondary),
+                      SizedBox(height: isPhoneKeyboardActive ? 12 : 34),
+                      if (showSocialOptions) ...[
+                        _OAuthButton(
+                          label: 'Continuer avec Google',
+                          icon: Icons.g_mobiledata_rounded,
+                          leading: const _GoogleLogoMark(size: 22),
+                          compact: isPhoneKeyboardActive,
+                          isLoading:
+                              _loadingSocialProvider ==
+                              NativeSocialProvider.google,
+                          onPressed: _isBusy
+                              ? null
+                              : () => _continueWithSocial(
+                                  NativeSocialProvider.google,
+                                ),
+                        ),
+                        if (showAppleAuth) ...[
+                          SizedBox(height: isPhoneKeyboardActive ? 8 : 12),
+                          _OAuthButton(
+                            label: 'Continuer avec Apple',
+                            icon: Icons.apple_rounded,
+                            compact: isPhoneKeyboardActive,
+                            isLoading:
+                                _loadingSocialProvider ==
+                                NativeSocialProvider.apple,
+                            onPressed: _isBusy
+                                ? null
+                                : () => _continueWithSocial(
+                                    NativeSocialProvider.apple,
+                                  ),
+                          ),
+                        ],
+                      ],
+                      if (showSocialOptions && showOtpAuth) ...[
+                        SizedBox(height: isPhoneKeyboardActive ? 10 : 22),
+                        const _AuthDivider(label: 'ou avec un code OTP'),
+                        SizedBox(height: isPhoneKeyboardActive ? 10 : 22),
+                      ],
+                      if (isPhoneKeyboardActive) const Spacer(),
+                      if (showOtpAuth) ...[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 58,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceElevated,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: AppColors.surfaceBorder,
+                                ),
+                              ),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const _CoteDIvoireFlag(),
+                                    const SizedBox(width: 9),
+                                    Text(
+                                      '+225',
+                                      style: AppTextStyles.body.copyWith(
+                                        height: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                focusNode: _phoneFocusNode,
+                                controller: _phoneController,
+                                enabled: !_isBusy,
+                                keyboardType: TextInputType.number,
+                                textInputAction: TextInputAction.done,
+                                inputFormatters: [
+                                  _PhoneNumberInputFormatter(
+                                    maxDigits: _phoneDigitsLength,
+                                  ),
+                                ],
+                                style: AppTextStyles.body,
+                                decoration: const InputDecoration(
+                                  hintText: 'Numéro de téléphone',
+                                  prefixIcon: Icon(
+                                    Icons.phone_iphone_rounded,
+                                    size: 19,
+                                  ),
+                                ),
+                                onSubmitted: (_) {
+                                  if (_hasValidPhone && !_isBusy) {
+                                    _continue();
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: isPhoneKeyboardActive ? 8 : 24),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              channelIcon,
+                              color: AppColors.accentGreen,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Tu recevras ton code OTP par $channelLabel sur ce numéro.',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: isPhoneKeyboardActive ? 8 : 18),
+                        AppButton(
+                          text: 'Continuer',
+                          isLoading: _isLoading,
+                          onPressed: _hasValidPhone && !_isBusy
+                              ? _continue
+                              : null,
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 18),
-                    AppButton(
-                      text: 'Continuer',
-                      isLoading: _isLoading,
-                      onPressed: _hasValidPhone && !_isBusy ? _continue : null,
-                    ),
-                  ],
-                  const Spacer(flex: 2),
-                  Text.rich(
-                    TextSpan(
-                      text: 'En continuant, tu acceptes nos ',
-                      children: [
-                        TextSpan(
-                          text: 'conditions générales d’utilisation',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.primaryDark,
-                            fontWeight: FontWeight.w800,
-                            decoration: TextDecoration.underline,
-                            decorationColor: AppColors.primaryDark,
-                          ),
-                          recognizer: TapGestureRecognizer()
-                            ..onTap = () => context.push('/legal/terms'),
-                        ),
-                        const TextSpan(text: ' et notre '),
-                        TextSpan(
-                          text: 'politique de confidentialité',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.primaryDark,
-                            fontWeight: FontWeight.w800,
-                            decoration: TextDecoration.underline,
-                            decorationColor: AppColors.primaryDark,
-                          ),
-                          recognizer: TapGestureRecognizer()
-                            ..onTap = () => context.push('/legal/privacy'),
-                        ),
-                        const TextSpan(text: '.'),
-                      ],
-                    ),
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodySmall,
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+      bottomNavigationBar: isPhoneKeyboardActive
+          ? const SizedBox.shrink()
+          : SafeArea(
+              top: false,
+              child: ColoredBox(
+                color: AppColors.background.withValues(alpha: 0.96),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 10),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceElevated.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.surfaceBorder.withValues(alpha: 0.65),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: _LegalConsentText(
+                        onTermsTap: () => context.push('/legal/terms'),
+                        onPrivacyTap: () => context.push('/legal/privacy'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _LegalConsentText extends StatelessWidget {
+  final VoidCallback onTermsTap;
+  final VoidCallback onPrivacyTap;
+
+  const _LegalConsentText({
+    required this.onTermsTap,
+    required this.onPrivacyTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        text: 'En continuant, tu acceptes nos ',
+        children: [
+          TextSpan(
+            text: 'conditions générales d’utilisation',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.primaryDark,
+              fontWeight: FontWeight.w800,
+              decoration: TextDecoration.underline,
+              decorationColor: AppColors.primaryDark,
+            ),
+            recognizer: TapGestureRecognizer()..onTap = onTermsTap,
+          ),
+          const TextSpan(text: ' et notre '),
+          TextSpan(
+            text: 'politique de confidentialité',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.primaryDark,
+              fontWeight: FontWeight.w800,
+              decoration: TextDecoration.underline,
+              decorationColor: AppColors.primaryDark,
+            ),
+            recognizer: TapGestureRecognizer()..onTap = onPrivacyTap,
+          ),
+          const TextSpan(text: '.'),
+        ],
+      ),
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: AppTextStyles.bodySmall.copyWith(height: 1.25),
     );
   }
 }
@@ -718,6 +815,7 @@ class _OAuthButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final Widget? leading;
+  final bool compact;
   final bool isLoading;
   final VoidCallback? onPressed;
 
@@ -725,6 +823,7 @@ class _OAuthButton extends StatelessWidget {
     required this.label,
     required this.icon,
     this.leading,
+    this.compact = false,
     required this.isLoading,
     required this.onPressed,
   });
@@ -734,7 +833,7 @@ class _OAuthButton extends StatelessWidget {
     final disabled = onPressed == null || isLoading;
 
     return SizedBox(
-      height: 56,
+      height: compact ? 48 : 56,
       child: OutlinedButton(
         onPressed: disabled ? null : onPressed,
         style: OutlinedButton.styleFrom(
@@ -755,8 +854,8 @@ class _OAuthButton extends StatelessWidget {
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  leading ?? Icon(icon, size: 24),
-                  const SizedBox(width: 10),
+                  leading ?? Icon(icon, size: compact ? 22 : 24),
+                  SizedBox(width: compact ? 8 : 10),
                   Flexible(
                     child: Text(
                       label,

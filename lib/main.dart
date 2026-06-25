@@ -18,6 +18,7 @@ import 'src/features/leaderboard/providers/leaderboard_provider.dart';
 import 'src/features/notifications/providers/notifications_provider.dart';
 import 'src/features/profile/providers/player_payment_methods_provider.dart';
 import 'src/features/profile/providers/profile_provider.dart';
+import 'src/features/quiz/services/quiz_asset_preload_service.dart';
 import 'src/features/quiz/services/quiz_result_sync_service.dart';
 import 'src/features/rewards/providers/rewards_provider.dart';
 import 'src/features/subscriptions/providers/player_subscription_provider.dart';
@@ -34,6 +35,7 @@ Future<void> main() async {
   await runZonedGuarded<Future<void>>(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      QuizAssetPreloadService.configureImageCache();
       final firebaseReady = await _initializeFirebase();
       await AppTelemetryService.initialize(firebaseReady: firebaseReady);
       await Supabase.initialize(url: kSupabaseUrl, anonKey: kSupabaseAnonKey);
@@ -187,7 +189,8 @@ class _AccountStatusGuardState extends ConsumerState<AccountStatusGuard>
             unawaited(
               _handleAccountRow(
                 row,
-                forceDisconnect: payload.eventType == PostgresChangeEvent.delete,
+                forceDisconnect:
+                    payload.eventType == PostgresChangeEvent.delete,
               ),
             );
           },

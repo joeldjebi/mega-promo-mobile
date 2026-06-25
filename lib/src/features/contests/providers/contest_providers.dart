@@ -267,6 +267,7 @@ class ContestDetailData {
   final Contest contest;
   final bool hasParticipated;
   final String? participationId;
+  final bool participationCompleted;
   final ContestUserRanking? userRanking;
   final UserProfile userProfile;
   final int participantsCount;
@@ -278,6 +279,7 @@ class ContestDetailData {
     required this.contest,
     required this.hasParticipated,
     required this.participationId,
+    required this.participationCompleted,
     required this.userRanking,
     required this.userProfile,
     required this.participantsCount,
@@ -753,6 +755,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     contest: contest,
     hasParticipated: participation != null,
     participationId: participation?['id'] as String?,
+    participationCompleted: participation?['completed'] as bool? ?? false,
     userRanking: userRanking,
     userProfile: profile,
     participantsCount: participantsCount,

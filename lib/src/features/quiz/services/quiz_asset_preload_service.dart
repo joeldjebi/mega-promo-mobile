@@ -25,16 +25,61 @@ class QuizMediaPreloadResult {
 class QuizAssetPreloadService {
   QuizAssetPreloadService._();
 
+  static const int _mediaCacheWidth = 1400;
+  static const int _imageCacheMaximumSize = 500;
+  static const int _imageCacheMaximumSizeBytes = 256 * 1024 * 1024;
+
+  static const _questionSelect = '''
+    id,
+    contest_id,
+    question_type,
+    prediction_type,
+    prediction_payload,
+    question_text,
+    question_image_url,
+    option_a,
+    option_a_image_url,
+    option_b,
+    option_b_image_url,
+    option_c,
+    option_c_image_url,
+    option_d,
+    option_d_image_url,
+    correct_answer,
+    points,
+    time_limit
+  ''';
+
   static final Map<String, List<QuizQuestion>> _questionsCache = {};
   static final Map<String, List<QuizQuestion>> _participationQuestionsCache =
       {};
   static final Set<String> _imageCacheKeys = {};
+  static final Set<String> _loadedImageUrls = {};
   static final Map<String, Future<List<QuizQuestion>>> _inFlightFetches = {};
   static final Map<String, Future<List<QuizQuestion>>>
   _inFlightParticipationFetches = {};
+  static final Map<String, Future<void>> _inFlightImagePreloads = {};
 
   static List<QuizQuestion>? cachedQuestions(String contestId) {
     return _questionsCache[contestId];
+  }
+
+  static void configureImageCache() {
+    final imageCache = PaintingBinding.instance.imageCache;
+    if (imageCache.maximumSize < _imageCacheMaximumSize) {
+      imageCache.maximumSize = _imageCacheMaximumSize;
+    }
+    if (imageCache.maximumSizeBytes < _imageCacheMaximumSizeBytes) {
+      imageCache.maximumSizeBytes = _imageCacheMaximumSizeBytes;
+    }
+  }
+
+  static ImageProvider<Object> mediaImageProvider(String url) {
+    return ResizeImage.resizeIfNeeded(
+      _mediaCacheWidth,
+      null,
+      NetworkImage(url),
+    );
   }
 
   static Future<List<QuizQuestion>> fetchQuestions(
@@ -145,6 +190,78 @@ class QuizAssetPreloadService {
     );
   }
 
+  static Future<QuizMediaPreloadResult> preloadAvailableMediaForContest(
+    BuildContext context, {
+    required String contestId,
+    bool force = false,
+    QuizAssetPreloadProgress? onProgress,
+  }) async {
+    final questions = await fetchAvailableQuestionsForContest(contestId);
+    if (!context.mounted) {
+      return const QuizMediaPreloadResult(total: 0, loaded: 0, failedUrls: []);
+    }
+
+    return preloadQuestionMedia(
+      context,
+      cacheScope: contestId,
+      questions: questions,
+      force: force,
+      onProgress: onProgress,
+    );
+  }
+
+  static Future<List<QuizQuestion>> fetchAvailableQuestionsForContest(
+    String contestId,
+  ) async {
+    try {
+      final directRows = await Supabase.instance.client
+          .from('questions')
+          .select(_questionSelect)
+          .eq('contest_id', contestId)
+          .eq('is_active', true)
+          .order('order_index', ascending: true)
+          .timeout(const Duration(seconds: 12));
+      final directQuestions = _questionsFromRows(directRows);
+      if (directQuestions.isNotEmpty) return directQuestions;
+
+      final contestRow = await Supabase.instance.client
+          .from('contests')
+          .select('category_id')
+          .eq('id', contestId)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 12));
+      final categoryId = (contestRow?['category_id'] as String?)?.trim();
+      if (categoryId == null || categoryId.isEmpty) return const [];
+
+      final linkRows = await Supabase.instance.client
+          .from('question_bank_categories')
+          .select('question_bank_id')
+          .eq('category_id', categoryId)
+          .timeout(const Duration(seconds: 12));
+      final bankIds = linkRows
+          .whereType<Map>()
+          .map((row) => row['question_bank_id'] as String?)
+          .whereType<String>()
+          .where((id) => id.trim().isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+      if (bankIds.isEmpty) return const [];
+
+      final bankRows = await Supabase.instance.client
+          .from('questions')
+          .select(_questionSelect)
+          .inFilter('question_bank_id', bankIds)
+          .eq('is_active', true)
+          .isFilter('contest_id', null)
+          .order('order_index', ascending: true)
+          .timeout(const Duration(seconds: 15));
+      return _questionsFromRows(bankRows);
+    } catch (error, stackTrace) {
+      authLogError('quizAvailableQuestionsMediaFetch', error, stackTrace);
+      return const [];
+    }
+  }
+
   static List<String> mediaUrlsForQuestions(List<QuizQuestion> questions) {
     final urls = <String>{};
     for (final question in questions) {
@@ -159,6 +276,14 @@ class QuizAssetPreloadService {
       }
     }
     return urls.toList(growable: false);
+  }
+
+  static List<QuizQuestion> _questionsFromRows(Object? rows) {
+    if (rows is! List) return const [];
+    return rows
+        .whereType<Map>()
+        .map((row) => QuizQuestion.fromJson(Map<String, dynamic>.from(row)))
+        .toList(growable: false);
   }
 
   static Future<QuizMediaPreloadResult> preloadQuestionMedia(
@@ -179,28 +304,31 @@ class QuizAssetPreloadService {
     final failedUrls = <String>[];
     onProgress?.call(loaded, urls.length);
 
-    await Future.wait(
-      urls.map((url) async {
-        final cacheKey = '$cacheScope::$url';
-        if (!force && _imageCacheKeys.contains(cacheKey)) {
-          loaded++;
-          onProgress?.call(loaded, urls.length);
-          return;
-        }
-        try {
-          await precacheImage(
-            NetworkImage(url),
-            context,
-          ).timeout(perImageTimeout);
-          _imageCacheKeys.add(cacheKey);
-        } catch (_) {
-          failedUrls.add(url);
-        } finally {
-          loaded++;
-          onProgress?.call(loaded, urls.length);
-        }
-      }),
-    );
+    for (final url in urls) {
+      final cacheKey = '$cacheScope::$url';
+      if (_loadedImageUrls.contains(url) ||
+          (!force && _imageCacheKeys.contains(cacheKey))) {
+        loaded++;
+        onProgress?.call(loaded, urls.length);
+        continue;
+      }
+      try {
+        final preload =
+            _inFlightImagePreloads[url] ??
+            precacheImage(mediaImageProvider(url), context);
+        _inFlightImagePreloads[url] = preload;
+
+        await preload.timeout(perImageTimeout);
+        _imageCacheKeys.add(cacheKey);
+        _loadedImageUrls.add(url);
+      } catch (_) {
+        failedUrls.add(url);
+      } finally {
+        _inFlightImagePreloads.remove(url);
+        loaded++;
+        onProgress?.call(loaded, urls.length);
+      }
+    }
 
     return QuizMediaPreloadResult(
       total: urls.length,

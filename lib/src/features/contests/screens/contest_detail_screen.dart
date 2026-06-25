@@ -20,6 +20,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../live_quiz/services/live_quiz_service.dart';
+import '../../quiz/services/quiz_asset_preload_service.dart';
 import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
@@ -488,6 +489,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       return 'Place réservée';
     }
     if (data.hasParticipated && data.contest.type == ContestType.quiz) {
+      if (!data.participationCompleted) return 'Continuer le quiz';
       return _isClassicQuizEnded
           ? 'Voir mon résultat'
           : 'Participation enregistrée';
@@ -527,6 +529,56 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
         'answers': const [],
       },
     );
+  }
+
+  void _openStartedQuiz(BuildContext context) {
+    final participationId = data.participationId?.trim() ?? '';
+    if (participationId.isEmpty) {
+      _refreshParticipationState(ref);
+      return;
+    }
+
+    context.go(
+      '/contests/${data.contest.id}/quiz',
+      extra: {'participationId': participationId},
+    );
+  }
+
+  Future<void> _preloadAssignedQuizMedia(
+    BuildContext context, {
+    required String participationId,
+  }) async {
+    final questions = await QuizAssetPreloadService.fetchParticipationQuestions(
+      contestId: data.contest.id,
+      participationId: participationId,
+      force: true,
+    );
+    if (!context.mounted) return;
+
+    final result = await QuizAssetPreloadService.preloadQuestionMedia(
+      context,
+      cacheScope: data.contest.id,
+      questions: questions,
+      force: true,
+    );
+    if (result.isComplete) return;
+
+    unawaited(
+      AppLogger.warning(
+        'contests',
+        'quiz_assigned_media_preload_partial',
+        'Certaines images assignees au quiz n ont pas pu etre prechargees.',
+        entityType: 'contest',
+        entityId: data.contest.id,
+        metadata: {
+          'contest_title': data.contest.title,
+          'participation_id': participationId,
+          'total': result.total,
+          'failed_count': result.failedUrls.length,
+        },
+      ),
+    );
+    throw _QuizMediaPreloadException(result.failedUrls.length);
   }
 
   Future<void> _shareOnWhatsApp(BuildContext context) async {
@@ -807,8 +859,13 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           ),
         );
 
-        _refreshParticipationState(ref);
+        await _preloadAssignedQuizMedia(
+          actionContext,
+          participationId: participationId,
+        );
         if (!actionContext.mounted) return;
+
+        _refreshParticipationState(ref);
         actionContext.go(
           '/contests/${data.contest.id}/quiz',
           extra: {'participationId': participationId},
@@ -826,6 +883,17 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           ),
         );
         if (!actionContext.mounted) return;
+        if (error is _QuizMediaPreloadException) {
+          ScaffoldMessenger.of(actionContext).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Impossible de charger ${error.failedCount} image(s). Vérifie ta connexion puis réessaie.',
+              ),
+            ),
+          );
+          _refreshParticipationState(ref);
+          return;
+        }
         ScaffoldMessenger.of(actionContext).showSnackBar(
           const SnackBar(
             content: Text('Participation déjà enregistrée pour ce quiz.'),
@@ -1071,7 +1139,9 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                   ? () => _openSubscriptions(context)
                   : data.hasParticipated
                   ? data.contest.type == ContestType.quiz
-                        ? () => _openMyQuizResult(context)
+                        ? data.participationCompleted
+                              ? () => _openMyQuizResult(context)
+                              : () => _openStartedQuiz(context)
                         : () => _refreshParticipationState(ref)
                   : (!contest.isLive && _dailyLimitReached)
                   ? () => _openSubscriptions(context)
@@ -1194,6 +1264,12 @@ class _EndedLiveQuizDetail extends StatelessWidget {
       ),
     );
   }
+}
+
+class _QuizMediaPreloadException implements Exception {
+  final int failedCount;
+
+  const _QuizMediaPreloadException(this.failedCount);
 }
 
 class _QuizRulesDecision {

@@ -1118,11 +1118,16 @@ class _LinkedAuthMethodsCardState extends State<_LinkedAuthMethodsCard> {
   static String _socialLinkErrorMessage(Object error) {
     final message = error.toString().toLowerCase();
     if (message.contains('identity_already_exists') ||
+        message.contains('identity already exists') ||
+        message.contains('provider is already linked') ||
         message.contains('already') ||
         message.contains('exists')) {
-      return 'Ce moyen de connexion est déjà utilisé par un autre compte.';
+      return 'Ce compte est déjà lié à un autre profil MegaPromo. Connecte-toi avec ce moyen de connexion ou contacte le support.';
     }
-    return 'Impossible de lier ce moyen de connexion pour le moment.';
+    if (message.contains('cancel') || message.contains('canceled')) {
+      return 'La liaison a été annulée. Tu peux réessayer quand tu veux.';
+    }
+    return 'Impossible de lier ce moyen de connexion pour le moment. Vérifie ta connexion et réessaie.';
   }
 }
 
@@ -1281,6 +1286,8 @@ class _LinkPhoneSheet extends StatefulWidget {
 }
 
 class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
+  static const _phoneDigitsLength = 10;
+
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
   String? _pendingPhone;
@@ -1320,13 +1327,41 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
             ),
             const SizedBox(height: 16),
             if (_pendingPhone == null)
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Numéro de téléphone',
-                  hintText: '+2250700000000',
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 58,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.surfaceBorder),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '+225',
+                        style: AppTextStyles.body.copyWith(height: 1),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: const [
+                        _GroupedPhoneInputFormatter(
+                          maxDigits: _phoneDigitsLength,
+                        ),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Numéro de téléphone',
+                        hintText: '07 00 00 00 00',
+                      ),
+                    ),
+                  ),
+                ],
               )
             else
               TextField(
@@ -1378,9 +1413,12 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
   }
 
   Future<void> _sendOtp() async {
-    final phone = _normalizePhoneNumber(_phoneController.text);
-    if (phone.length < 9) {
-      setState(() => _error = 'Renseigne un numéro valide.');
+    final digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final phone = '+225$digits';
+    if (digits.length != _phoneDigitsLength) {
+      setState(() {
+        _error = 'Renseigne les 10 chiffres du numéro, sans l’indicatif +225.';
+      });
       return;
     }
 
@@ -1402,7 +1440,7 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
       );
       if (!mounted) return;
       setState(() {
-        _error = 'Impossible d’envoyer le code pour le moment.';
+        _error = _phoneLinkSendErrorMessage(error);
       });
     } finally {
       if (mounted) _setBusy(false);
@@ -1413,7 +1451,7 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
     final phone = _pendingPhone;
     final token = _otpController.text.trim();
     if (phone == null || token.length < 4) {
-      setState(() => _error = 'Renseigne le code reçu.');
+      setState(() => _error = 'Renseigne le code OTP reçu par SMS.');
       return;
     }
 
@@ -1447,7 +1485,7 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
       );
       if (!mounted) return;
       setState(() {
-        _error = 'Code invalide ou expiré.';
+        _error = _phoneLinkVerifyErrorMessage(error);
       });
     } finally {
       if (mounted) _setBusy(false);
@@ -1457,6 +1495,49 @@ class _LinkPhoneSheetState extends State<_LinkPhoneSheet> {
   void _setBusy(bool value) {
     setState(() => _isBusy = value);
     widget.onBusyChanged(value);
+  }
+
+  static String _phoneLinkSendErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (_looksLikeExistingPhoneError(message)) {
+      return 'Ce numéro est déjà lié à un autre compte MegaPromo. Connecte-toi avec ce numéro ou contacte le support.';
+    }
+    if (message.contains('rate') ||
+        message.contains('too many') ||
+        message.contains('over')) {
+      return 'Trop de tentatives pour ce numéro. Patiente quelques minutes avant de demander un nouveau code.';
+    }
+    if (message.contains('invalid') || message.contains('phone')) {
+      return 'Ce numéro ne semble pas valide. Vérifie l’indicatif et les chiffres, puis réessaie.';
+    }
+    return 'Impossible d’envoyer le code OTP pour le moment. Vérifie ta connexion et réessaie.';
+  }
+
+  static String _phoneLinkVerifyErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (_looksLikeExistingPhoneError(message)) {
+      return 'Ce numéro appartient déjà à un autre compte MegaPromo. La liaison n’a pas été faite.';
+    }
+    if (message.contains('expired')) {
+      return 'Ce code OTP a expiré. Demande un nouveau code pour lier ton numéro.';
+    }
+    if (message.contains('invalid') ||
+        message.contains('token') ||
+        message.contains('otp')) {
+      return 'Code OTP incorrect. Vérifie le code reçu et réessaie.';
+    }
+    return 'Impossible de vérifier ce code pour le moment. Réessaie dans quelques instants.';
+  }
+
+  static bool _looksLikeExistingPhoneError(String message) {
+    return message.contains('phone_already_exists') ||
+        message.contains('phone already exists') ||
+        message.contains('phone_exists') ||
+        message.contains('already registered') ||
+        message.contains('already exists') ||
+        message.contains('already been registered') ||
+        message.contains('user already registered') ||
+        message.contains('duplicate');
   }
 }
 
@@ -2888,16 +2969,6 @@ String _formatPhoneDigits(String value, int maxDigits) {
   }
 
   return groups.join(' ');
-}
-
-String _normalizePhoneNumber(String value) {
-  final trimmed = value.trim();
-  final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
-  if (digits.isEmpty) return '';
-  if (trimmed.startsWith('+')) return '+$digits';
-  if (digits.startsWith('225')) return '+$digits';
-  if (digits.length >= 8 && digits.length <= 10) return '+225$digits';
-  return '+$digits';
 }
 
 String _phoneHint(int phoneDigits) {

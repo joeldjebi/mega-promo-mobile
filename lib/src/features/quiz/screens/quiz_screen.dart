@@ -537,15 +537,20 @@ class _QuizRunnerState extends State<_QuizRunner> with WidgetsBindingObserver {
   void _precacheQuestionImages(int index) {
     if (index < 0 || index >= widget.questions.length) return;
     final question = widget.questions[index];
-    final urls = <String>[
+    final urls = <String>{
       if (question.questionImageUrl?.isNotEmpty == true)
         question.questionImageUrl!,
       ...question.optionImageUrls.whereType<String>().where(
         (url) => url.isNotEmpty,
       ),
-    ];
+    };
     for (final url in urls) {
-      unawaited(precacheImage(NetworkImage(url), context).catchError((_) {}));
+      unawaited(
+        precacheImage(
+          QuizAssetPreloadService.mediaImageProvider(url),
+          context,
+        ).catchError((_) {}),
+      );
     }
   }
 
@@ -1142,9 +1147,10 @@ class _QuizMediaImage extends StatelessWidget {
       child: Container(
         height: height,
         color: AppColors.surfaceElevated,
-        child: Image.network(
-          imageUrl,
+        child: Image(
+          image: QuizAssetPreloadService.mediaImageProvider(imageUrl),
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (context, error, stackTrace) {
             return Center(
               child: Icon(
