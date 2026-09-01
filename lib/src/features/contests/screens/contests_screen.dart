@@ -505,6 +505,12 @@ class _ListContestCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (!isEndedLive &&
+                hasParticipated &&
+                contest.canRequestReplay) ...[
+              const SizedBox(width: 8),
+              _ReplayTextButton(contest: contest),
+            ],
           ],
         ),
       ),
@@ -606,7 +612,40 @@ class _GridContestCard extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
               ),
+            if (!isEndedLive && hasParticipated && contest.canRequestReplay)
+              _ReplayTextButton(contest: contest, compact: true),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReplayTextButton extends StatelessWidget {
+  final Contest contest;
+  final bool compact;
+
+  const _ReplayTextButton({required this.contest, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: () {
+        clearContestDetailCache(contest.id);
+        context.push('/contests/${contest.id}');
+      },
+      icon: Icon(Icons.replay_rounded, size: compact ? 15 : 17),
+      label: const Text('Rejouer'),
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.primary,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 7 : 9,
+          vertical: compact ? 5 : 7,
+        ),
+        minimumSize: const Size(0, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: AppTextStyles.bodySmall.copyWith(
+          fontWeight: FontWeight.w900,
         ),
       ),
     );

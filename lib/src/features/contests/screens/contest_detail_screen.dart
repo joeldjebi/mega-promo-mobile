@@ -21,6 +21,8 @@ import '../../home/providers/home_bootstrap_provider.dart';
 import '../../home/providers/user_profile_provider.dart';
 import '../../live_quiz/services/live_quiz_service.dart';
 import '../../quiz/services/quiz_asset_preload_service.dart';
+import '../../quiz_replay/providers/quiz_replay_provider.dart';
+import '../../quiz_replay/widgets/quiz_replay_sheet.dart';
 import '../../rewards/services/badge_award_service.dart';
 import '../../../services/app_telemetry_service.dart';
 import '../../../services/app_logger.dart';
@@ -473,6 +475,11 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       data.contest.isLiveEnded ||
       _isLiveRegisteredAndWaiting;
 
+  bool get _shouldShowReplayAction =>
+      data.hasParticipated &&
+      data.participationCompleted &&
+      data.contest.canRequestReplay;
+
   String get _buttonText {
     if (_planAccessDenied) return 'Voir les offres';
     if (data.contest.isLive) {
@@ -490,6 +497,13 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     }
     if (data.hasParticipated && data.contest.type == ContestType.quiz) {
       if (!data.participationCompleted) return 'Continuer le quiz';
+      if (data.replayStatus.canStartReplay) return 'Commencer le replay';
+      if (_shouldShowReplayAction) {
+        if (data.replayStatus.status == QuizReplayRequestStatus.pending) {
+          return 'Preuve en attente';
+        }
+        return 'Rejouer';
+      }
       return _isClassicQuizEnded
           ? 'Voir mon résultat'
           : 'Participation enregistrée';
@@ -541,6 +555,24 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
     context.go(
       '/contests/${data.contest.id}/quiz',
       extra: {'participationId': participationId},
+    );
+  }
+
+  Future<void> _openReplaySheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => QuizReplaySheet(
+        contest: data.contest,
+        onSubmitted: () {
+          _refreshParticipationState(ref);
+          ref.invalidate(quizReplayStatusProvider(data.contest.id));
+        },
+      ),
     );
   }
 
@@ -830,13 +862,25 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       final supabase = Supabase.instance.client;
       try {
         final deviceSessionId = await DeviceSessionService.currentSessionId();
-        final result = await supabase.rpc(
-          'start_quiz_contest',
-          params: {
-            'p_contest_id': data.contest.id,
-            'p_device_session_id': deviceSessionId,
-          },
-        );
+        final replayRequestId = data.replayStatus.canStartReplay
+            ? data.replayStatus.requestId
+            : null;
+        final result = replayRequestId == null
+            ? await supabase.rpc(
+                'start_quiz_contest',
+                params: {
+                  'p_contest_id': data.contest.id,
+                  'p_device_session_id': deviceSessionId,
+                },
+              )
+            : await supabase.rpc(
+                'start_quiz_contest_replay',
+                params: {
+                  'p_contest_id': data.contest.id,
+                  'p_replay_request_id': replayRequestId,
+                  'p_device_session_id': deviceSessionId,
+                },
+              );
         final participationId = result is Map
             ? result['participation_id'] as String?
             : null;
@@ -854,6 +898,7 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             metadata: {
               'contest_title': data.contest.title,
               'participation_id': participationId,
+              'replay_request_id': replayRequestId,
               if (result is Map) 'questions_count': result['questions_count'],
             },
           ),
@@ -1139,7 +1184,11 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
                   ? () => _openSubscriptions(context)
                   : data.hasParticipated
                   ? data.contest.type == ContestType.quiz
-                        ? data.participationCompleted
+                        ? data.replayStatus.canStartReplay
+                              ? () => _participate(context)
+                              : _shouldShowReplayAction
+                              ? () => _openReplaySheet(context)
+                              : data.participationCompleted
                               ? () => _openMyQuizResult(context)
                               : () => _openStartedQuiz(context)
                         : () => _refreshParticipationState(ref)

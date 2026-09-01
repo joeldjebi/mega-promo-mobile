@@ -10,6 +10,7 @@ import 'package:mega_promo/core/utils/currency_formatter.dart';
 import 'package:mega_promo/core/widgets/app_card.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../config/app_store_review_mode.dart';
@@ -19,6 +20,8 @@ import '../../contests/models/contest.dart';
 import '../../contests/providers/contest_providers.dart';
 import '../../contests/services/contest_asset_preload_service.dart';
 import '../../contests/widgets/contest_timer.dart';
+import '../../quiz_replay/providers/quiz_replay_provider.dart';
+import '../../quiz_replay/widgets/quiz_replay_sheet.dart';
 import '../../../services/synced_clock_service.dart';
 import '../providers/home_bootstrap_provider.dart';
 import '../providers/info_message_provider.dart';
@@ -39,9 +42,11 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
   String? _selectedCategoryId;
   Timer? _liveTicker;
+  RealtimeChannel? _appUpdateChannel;
   DateTime? _nextLiveAutoRefreshAt;
   DateTime? _lastLiveAutoRefreshAt;
   String? _preloadedContestAssetsKey;
@@ -49,14 +54,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<Contest>? _lastContests;
   Set<String>? _lastParticipatedContestIds;
   Set<String>? _lastRegisteredLiveQuizIds;
+  bool _isAppUpdateChecking = false;
+  bool _isAppUpdateDialogOpen = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _liveTicker = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _handleLiveTicker(),
     );
+    _subscribeToAppUpdateConfig();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkHomeAppUpdate(forceReminder: false));
+    });
   }
 
   void _handleLiveTicker() {
@@ -80,8 +92,128 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _liveTicker?.cancel();
+    final appUpdateChannel = _appUpdateChannel;
+    _appUpdateChannel = null;
+    if (appUpdateChannel != null) {
+      unawaited(Supabase.instance.client.removeChannel(appUpdateChannel));
+    }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkHomeAppUpdate(forceReminder: false));
+    }
+  }
+
+  void _subscribeToAppUpdateConfig() {
+    _appUpdateChannel = Supabase.instance.client
+        .channel('home-app-update-config')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'app_update_config',
+          callback: (_) {
+            unawaited(_checkHomeAppUpdate(forceReminder: true));
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _checkHomeAppUpdate({required bool forceReminder}) async {
+    if (!mounted || _isAppUpdateChecking || _isAppUpdateDialogOpen) return;
+    _isAppUpdateChecking = true;
+    try {
+      final status = await AppUpdateService.check();
+      final config = status.config;
+      debugPrint(
+        '[APP_UPDATE_HOME] status must=${status.mustUpdate} '
+        'should=${status.shouldUpdate} config=${config != null}',
+      );
+      if (!mounted || config == null) return;
+      if (!status.mustUpdate && !status.shouldUpdate) return;
+
+      final shouldShow =
+          status.mustUpdate ||
+          forceReminder ||
+          await AppUpdateService.shouldShowReminder(config, surface: 'home');
+      debugPrint(
+        '[APP_UPDATE_HOME] reminder force=$forceReminder show=$shouldShow '
+        'type=${config.updateType}',
+      );
+      if (!shouldShow || !mounted) return;
+
+      await _showHomeUpdateDialog(config, isBlocking: status.mustUpdate);
+      if (!status.mustUpdate) {
+        await AppUpdateService.markReminderShown(config, surface: 'home');
+      }
+    } finally {
+      _isAppUpdateChecking = false;
+    }
+  }
+
+  Future<void> _showHomeUpdateDialog(
+    AppUpdateConfig config, {
+    required bool isBlocking,
+  }) async {
+    if (!mounted || _isAppUpdateDialogOpen) return;
+    _isAppUpdateDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: !isBlocking,
+        builder: (dialogContext) {
+          final versionLabel = config.latestVersion.trim().isNotEmpty
+              ? 'Version ${config.latestVersion}'
+              : 'Build ${config.latestBuild}';
+          return PopScope(
+            canPop: !isBlocking,
+            child: AlertDialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: const BorderSide(color: AppColors.surfaceBorder),
+              ),
+              title: Text(config.title, style: AppTextStyles.h2),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(config.message, style: AppTextStyles.body),
+                  const SizedBox(height: 12),
+                  Text(versionLabel, style: AppTextStyles.bodySmall),
+                ],
+              ),
+              actions: [
+                if (!isBlocking)
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Plus tard'),
+                  ),
+                FilledButton.icon(
+                  onPressed: () {
+                    unawaited(AppUpdateService.openStore(config));
+                    if (!isBlocking) {
+                      Navigator.of(dialogContext).pop();
+                    }
+                  },
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Mettre à jour'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } finally {
+      _isAppUpdateDialogOpen = false;
+      if (mounted && isBlocking) {
+        unawaited(_checkHomeAppUpdate(forceReminder: true));
+      }
+    }
   }
 
   @override
@@ -121,6 +253,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _lastRegisteredLiveQuizIds ?? const <String>{};
     final shuffleSeed = ref.watch(contestsShuffleSeedProvider);
     final infoMessages = ref.watch(infoMessagesProvider);
+    final replayRequests = ref.watch(quizReplayHomeRequestsProvider);
     final visibleCategories = _lastContests == null
         ? const <Category>[]
         : _categoriesWithContests(
@@ -188,11 +321,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ..invalidate(contestsProvider)
                   ..invalidate(userParticipatedContestIdsProvider)
                   ..invalidate(userRegisteredLiveQuizIdsProvider)
+                  ..invalidate(quizReplayHomeRequestsProvider)
                   ..invalidate(categoriesProvider);
                 ref.read(contestsShuffleSeedProvider.notifier).refresh();
                 await Future.wait([
                   ref.refresh(homeBootstrapProvider.future),
                   ref.refresh(contestsProvider.future),
+                  ref.refresh(quizReplayHomeRequestsProvider.future),
                 ]);
               },
               child: ListView(
@@ -278,6 +413,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       final visibleAllContests = allContests
                           .where((contest) => contest.id != playNowContest?.id)
                           .toList(growable: false);
+                      final replayRequestItems = replayRequests.maybeWhen(
+                        data: (requests) {
+                          final contestsById = {
+                            for (final contest in items) contest.id: contest,
+                          };
+                          return requests
+                              .where(
+                                (request) =>
+                                    request.status ==
+                                        QuizReplayRequestStatus.pending ||
+                                    request.status ==
+                                        QuizReplayRequestStatus.approved,
+                              )
+                              .map(
+                                (request) => MapEntry(
+                                  request,
+                                  contestsById[request.contestId],
+                                ),
+                              )
+                              .where((entry) => entry.value != null)
+                              .take(5)
+                              .toList(growable: false);
+                        },
+                        orElse: () =>
+                            const <MapEntry<QuizReplayHomeRequest, Contest?>>[],
+                      );
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -321,6 +482,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   ),
                             orElse: () => const SizedBox.shrink(),
                           ),
+                          if (replayRequestItems.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            const _HomeSectionLabel('REPLAY JCQ'),
+                            const SizedBox(height: 10),
+                            ...replayRequestItems.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 9),
+                                child: _ReplayRequestContestCard(
+                                  request: entry.key,
+                                  contest: entry.value!,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           if (visibleBoosted.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             const _HomeSectionLabel('BOOSTÉS'),
@@ -899,23 +1075,36 @@ class _PlayNowContestCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      color: hasParticipated
-                          ? Colors.white.withValues(alpha: 0.18)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      hasParticipated ? 'Voir mes résultats' : 'Jouer',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.button.copyWith(
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: hasParticipated && contest.canRequestReplay
+                        ? () {
+                            clearContestDetailCache(contest.id);
+                            context.push('/contests/${contest.id}');
+                          }
+                        : null,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
                         color: hasParticipated
-                            ? Colors.white
-                            : AppColors.primaryDark,
-                        fontWeight: FontWeight.w900,
+                            ? Colors.white.withValues(alpha: 0.18)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        hasParticipated && contest.canRequestReplay
+                            ? 'Rejouer'
+                            : hasParticipated
+                            ? 'Voir mes résultats'
+                            : 'Jouer',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.button.copyWith(
+                          color: hasParticipated
+                              ? Colors.white
+                              : AppColors.primaryDark,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ),
@@ -1302,31 +1491,44 @@ class _FeaturedContestCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
-                  height: buttonHeight,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: hasParticipated
-                          ? AppColors.surfaceBorder
-                          : AppColors.primary,
-                      borderRadius: BorderRadius.circular(13),
-                      border: hasParticipated
-                          ? Border.all(color: AppColors.separator)
-                          : null,
-                    ),
-                    child: Center(
-                      child: Text(
-                        hasParticipated ? 'Détails' : 'Participer',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: AppTextStyles.button.copyWith(
-                          color: hasParticipated
-                              ? AppColors.textSecondary
-                              : Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: hasParticipated && contest.canRequestReplay
+                      ? () {
+                          clearContestDetailCache(contest.id);
+                          context.push('/contests/${contest.id}');
+                        }
+                      : null,
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: buttonHeight,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: hasParticipated
+                            ? AppColors.surfaceBorder
+                            : AppColors.primary,
+                        borderRadius: BorderRadius.circular(13),
+                        border: hasParticipated
+                            ? Border.all(color: AppColors.separator)
+                            : null,
+                      ),
+                      child: Center(
+                        child: Text(
+                          hasParticipated && contest.canRequestReplay
+                              ? 'Rejouer'
+                              : hasParticipated
+                              ? 'Détails'
+                              : 'Participer',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.button.copyWith(
+                            color: hasParticipated
+                                ? AppColors.textSecondary
+                                : Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ),
@@ -1910,6 +2112,133 @@ class _BrandLogo extends StatelessWidget {
   }
 }
 
+Future<void> _showQuizReplaySheet(BuildContext context, Contest contest) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (_) => QuizReplaySheet(contest: contest),
+  );
+}
+
+class _HomeReplayButton extends StatelessWidget {
+  final Contest contest;
+
+  const _HomeReplayButton({required this.contest});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: () {
+        clearContestDetailCache(contest.id);
+        context.push('/contests/${contest.id}');
+      },
+      icon: const Icon(Icons.replay_rounded, size: 16),
+      label: const Text('Rejouer'),
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.primary,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        minimumSize: const Size(0, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: AppTextStyles.bodySmall.copyWith(
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _ReplayRequestContestCard extends StatelessWidget {
+  final QuizReplayHomeRequest request;
+  final Contest contest;
+
+  const _ReplayRequestContestCard({
+    required this.request,
+    required this.contest,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final canPlay = request.canPlay;
+    final statusText = canPlay
+        ? 'Vous pouvez jouer'
+        : 'En attente de validation';
+    final statusColor = canPlay ? AppColors.accentGreen : AppColors.gold;
+
+    return AppCard(
+      onTap: () {
+        if (canPlay) {
+          clearContestDetailCache(contest.id);
+          context.push('/contests/${contest.id}');
+          return;
+        }
+        _showQuizReplaySheet(context, contest);
+      },
+      padding: const EdgeInsets.all(13),
+      borderRadius: 18,
+      backgroundColor: statusColor.withValues(alpha: 0.08),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Icon(
+              canPlay ? Icons.play_arrow_rounded : Icons.hourglass_top_rounded,
+              color: statusColor,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  contest.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.h3.copyWith(
+                    color: AppColors.textPrimary,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _CategoryBadge(label: statusText),
+                    _InlineMeta(
+                      icon: Icons.payments_rounded,
+                      label: _formatPrize(request.amount.toDouble()),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            canPlay ? 'Jouer' : 'Voir',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: statusColor,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CompactContestCard extends ConsumerWidget {
   final Contest contest;
   final bool hasParticipated;
@@ -1998,6 +2327,10 @@ class _CompactContestCard extends ConsumerWidget {
               ],
             ),
           ),
+          if (hasParticipated && contest.canRequestReplay) ...[
+            const SizedBox(width: 8),
+            _HomeReplayButton(contest: contest),
+          ],
         ],
       ),
     );
@@ -2102,23 +2435,28 @@ class _GamingBadge extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(data.icon, color: data.color, size: compact ? 10 : 12),
-          SizedBox(width: compact ? 3 : 4),
-          Text(
-            data.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.bodySmall.copyWith(
-              color: data.color,
-              fontSize: compact ? 9.3 : 10.5,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: compact ? 92 : 118),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(data.icon, color: data.color, size: compact ? 10 : 12),
+            SizedBox(width: compact ? 3 : 4),
+            Flexible(
+              child: Text(
+                data.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: data.color,
+                  fontSize: compact ? 9.3 : 10.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2406,8 +2744,16 @@ double _playerLevelProgress(int points) {
 }
 
 String _compactPoints(int points) {
-  if (points >= 1000000) return '${(points / 1000000).toStringAsFixed(1)}M';
-  if (points >= 1000) return '${(points / 1000).toStringAsFixed(1)}K';
+  String compact(int divisor, String suffix) {
+    final truncated = (points * 10 ~/ divisor) / 10;
+    final label = truncated == truncated.truncateToDouble()
+        ? truncated.toInt().toString()
+        : truncated.toStringAsFixed(1);
+    return '$label$suffix';
+  }
+
+  if (points >= 1000000) return compact(1000000, 'M');
+  if (points >= 1000) return compact(1000, 'k');
   return '$points';
 }
 

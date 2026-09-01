@@ -11,6 +11,7 @@ import '../../../services/app_telemetry_service.dart';
 import '../../../services/network_status_service.dart';
 import '../../../services/synced_clock_service.dart';
 import '../../settings/providers/app_feature_flags_provider.dart';
+import '../../quiz_replay/providers/quiz_replay_provider.dart';
 import '../models/contest.dart';
 
 final categoriesProvider = FutureProvider<List<Category>>((ref) async {
@@ -274,6 +275,7 @@ class ContestDetailData {
   final ContestPrediction? prediction;
   final ContestDrawSettings? drawSettings;
   final bool hasLiveRegistration;
+  final QuizReplayStatus replayStatus;
 
   const ContestDetailData({
     required this.contest,
@@ -286,6 +288,7 @@ class ContestDetailData {
     required this.prediction,
     required this.drawSettings,
     required this.hasLiveRegistration,
+    required this.replayStatus,
   });
 }
 
@@ -554,6 +557,8 @@ Future<Map<String, dynamic>?> _fetchContestParticipation(
       .select('id, completed')
       .eq('user_id', userId)
       .eq('contest_id', contestId)
+      .order('participated_at', ascending: false)
+      .limit(1)
       .maybeSingle();
   authLogResponse('contestParticipationCheck', participation);
   if (participation == null) return null;
@@ -638,6 +643,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   var hasLiveRegistration = contest.isLive
       ? await liveRegistrationFuture
       : false;
+  var replayStatus = const QuizReplayStatus.unavailable();
 
   if (contest.categoryId != null) {
     try {
@@ -751,6 +757,10 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     }
   }
 
+  if (contest.canRequestReplay && participation != null) {
+    replayStatus = await fetchQuizReplayStatus(supabase, contestId);
+  }
+
   final detail = ContestDetailData(
     contest: contest,
     hasParticipated: participation != null,
@@ -762,6 +772,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     prediction: prediction,
     drawSettings: drawSettings,
     hasLiveRegistration: hasLiveRegistration,
+    replayStatus: replayStatus,
   );
   _contestDetailCache[cacheKey] = detail;
 

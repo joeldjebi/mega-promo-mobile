@@ -303,6 +303,16 @@ void _openNotificationTarget(
     case 'leaderboard':
       context.go('/leaderboard');
       return;
+    case 'quiz_replay_approved':
+      final contestId =
+          notification.data['contest_id'] as String? ??
+          notification.data['contestId'] as String?;
+      if (contestId != null && contestId.isNotEmpty) {
+        context.go('/contests/$contestId');
+        return;
+      }
+      context.go('/contests');
+      return;
     case 'profile':
       context.go('/profile');
       return;
@@ -428,6 +438,7 @@ IconData _iconForType(String type) {
     'contest_finished' => Icons.flag_rounded,
     'contest' => Icons.campaign_rounded,
     'live_quiz_waiting' || 'live_quiz_reminder' => Icons.bolt_rounded,
+    'quiz_replay_approved' => Icons.replay_rounded,
     'leaderboard' => Icons.leaderboard_rounded,
     _ => Icons.notifications_rounded,
   };

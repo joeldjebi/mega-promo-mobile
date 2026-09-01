@@ -639,6 +639,15 @@ class FcmService {
       case 'leaderboard':
         context.go('/leaderboard');
         return;
+      case 'quiz_replay_approved':
+        final contestId =
+            data['contest_id'] as String? ?? data['contestId'] as String?;
+        if (contestId != null && contestId.isNotEmpty) {
+          context.go('/contests/$contestId');
+          return;
+        }
+        context.go('/contests');
+        return;
       case 'profile':
         context.go('/profile');
         return;

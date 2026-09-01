@@ -87,6 +87,11 @@ class Contest {
   final int liveDurationSeconds;
   final int participantsCount;
   final int quizQuestionCount;
+  final bool replayEnabled;
+  final int replayAmount;
+  final String replayPaymentTarget;
+  final String replayPaymentUrl;
+  final String replayPaymentInstructions;
 
   const Contest({
     required this.id,
@@ -120,6 +125,11 @@ class Contest {
     required this.liveDurationSeconds,
     required this.participantsCount,
     required this.quizQuestionCount,
+    required this.replayEnabled,
+    required this.replayAmount,
+    required this.replayPaymentTarget,
+    required this.replayPaymentUrl,
+    required this.replayPaymentInstructions,
   });
 
   factory Contest.fromJson(Map<String, dynamic> json) {
@@ -160,6 +170,20 @@ class Contest {
           (json['live_duration_seconds'] as num?)?.toInt() ?? 0,
       participantsCount: (json['participants_count'] as num?)?.toInt() ?? 0,
       quizQuestionCount: _questionCountFromMetadata(rewardMetadata),
+      replayEnabled: _boolFromMetadata(rewardMetadata['quiz_replay_enabled']),
+      replayAmount: _intFromMetadata(rewardMetadata['quiz_replay_amount']),
+      replayPaymentTarget:
+          rewardMetadata['quiz_replay_payment_target'] as String? ??
+          rewardMetadata['quiz_replay_payment_number'] as String? ??
+          '',
+      replayPaymentUrl:
+          rewardMetadata['quiz_replay_payment_url'] as String? ??
+          rewardMetadata['quiz_replay_payment_link'] as String? ??
+          '',
+      replayPaymentInstructions:
+          rewardMetadata['quiz_replay_payment_instructions'] as String? ??
+          rewardMetadata['quiz_replay_message'] as String? ??
+          '',
     );
   }
 
@@ -196,6 +220,11 @@ class Contest {
       liveDurationSeconds: liveDurationSeconds,
       participantsCount: participantsCount,
       quizQuestionCount: quizQuestionCount,
+      replayEnabled: replayEnabled,
+      replayAmount: replayAmount,
+      replayPaymentTarget: replayPaymentTarget,
+      replayPaymentUrl: replayPaymentUrl,
+      replayPaymentInstructions: replayPaymentInstructions,
     );
   }
 
@@ -232,6 +261,11 @@ class Contest {
       liveDurationSeconds: liveDurationSeconds,
       participantsCount: participantsCount,
       quizQuestionCount: quizQuestionCount,
+      replayEnabled: replayEnabled,
+      replayAmount: replayAmount,
+      replayPaymentTarget: replayPaymentTarget,
+      replayPaymentUrl: replayPaymentUrl,
+      replayPaymentInstructions: replayPaymentInstructions,
     );
   }
 
@@ -318,6 +352,9 @@ class Contest {
         })
         .join(' + ');
   }
+
+  bool get canRequestReplay =>
+      type == ContestType.quiz && !isLive && replayEnabled && replayAmount > 0;
 }
 
 Map<String, dynamic> _jsonMap(Object? value) {
@@ -336,6 +373,22 @@ int _questionCountFromMetadata(Map<String, dynamic> metadata) {
     if (parsed != null) return parsed.clamp(1, 50);
   }
   return 5;
+}
+
+int _intFromMetadata(Object? value) {
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value.trim()) ?? 0;
+  return 0;
+}
+
+bool _boolFromMetadata(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    return normalized == 'true' || normalized == '1' || normalized == 'yes';
+  }
+  return false;
 }
 
 List<String> _allowedPlanKeys(Object? value) {
