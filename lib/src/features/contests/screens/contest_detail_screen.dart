@@ -480,6 +480,15 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       data.participationCompleted &&
       data.contest.canRequestReplay;
 
+  bool get _isReplayStartReady =>
+      _shouldShowReplayAction && data.replayStatus.canStartReplay;
+
+  bool get _shouldUseParticipatedButtonStyle =>
+      data.hasParticipated &&
+      !data.contest.isLive &&
+      !(data.contest.type == ContestType.quiz && _isClassicQuizEnded) &&
+      !_isReplayStartReady;
+
   String get _buttonText {
     if (_planAccessDenied) return 'Voir les offres';
     if (data.contest.isLive) {
@@ -862,9 +871,28 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
       final supabase = Supabase.instance.client;
       try {
         final deviceSessionId = await DeviceSessionService.currentSessionId();
-        final replayRequestId = data.replayStatus.canStartReplay
-            ? data.replayStatus.requestId
+        var replayStatus = data.replayStatus;
+        if (_shouldShowReplayAction) {
+          replayStatus = await fetchQuizReplayStatus(supabase, data.contest.id);
+          ref.invalidate(quizReplayStatusProvider(data.contest.id));
+          if (!replayStatus.canStartReplay) {
+            if (!actionContext.mounted) return;
+            final message =
+                replayStatus.status == QuizReplayRequestStatus.pending
+                ? 'Ton paiement replay est encore en attente de validation.'
+                : 'Aucun replay validé disponible pour ce JCQ.';
+            ScaffoldMessenger.of(
+              actionContext,
+            ).showSnackBar(SnackBar(content: Text(message)));
+            return;
+          }
+        }
+        final replayRequestId = replayStatus.canStartReplay
+            ? replayStatus.requestId
             : null;
+        if (_shouldShowReplayAction && replayRequestId == null) {
+          throw StateError('Autorisation replay introuvable.');
+        }
         final result = replayRequestId == null
             ? await supabase.rpc(
                 'start_quiz_contest',
@@ -939,11 +967,9 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
           _refreshParticipationState(ref);
           return;
         }
-        ScaffoldMessenger.of(actionContext).showSnackBar(
-          const SnackBar(
-            content: Text('Participation déjà enregistrée pour ce quiz.'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          actionContext,
+        ).showSnackBar(SnackBar(content: Text(_formatQuizStartError(error))));
         _refreshParticipationState(ref);
       } finally {
         await stopLoading();
@@ -1166,16 +1192,10 @@ class _ContestDetailBodyState extends ConsumerState<_ContestDetailBody> {
             child: AppButton(
               text: _buttonText,
               isLoading: _isActionRunning,
-              color:
-                  data.hasParticipated &&
-                      !contest.isLive &&
-                      !(contest.type == ContestType.quiz && _isClassicQuizEnded)
+              color: _shouldUseParticipatedButtonStyle
                   ? AppColors.surfaceBorder
                   : null,
-              foregroundColor:
-                  data.hasParticipated &&
-                      !contest.isLive &&
-                      !(contest.type == ContestType.quiz && _isClassicQuizEnded)
+              foregroundColor: _shouldUseParticipatedButtonStyle
                   ? AppColors.textSecondary
                   : null,
               onPressed: _isActionDisabled || _isActionRunning
@@ -2262,6 +2282,32 @@ String _formatLiveQuizError(Object error) {
     return 'Ton forfait ne permet pas de participer à ce Quiz Live.';
   }
   return 'Action impossible pour le moment. Réessaie.';
+}
+
+String _formatQuizStartError(Object error) {
+  final safeMessage = AppTelemetryService.userMessageForError(
+    error,
+    fallback: 'Impossible de démarrer ce JCQ pour le moment.',
+  );
+  if (safeMessage != 'Impossible de démarrer ce JCQ pour le moment.') {
+    return safeMessage;
+  }
+
+  final message = '$error';
+  if (message.contains('Participation deja enregistree') ||
+      message.contains('Participation déjà enregistrée')) {
+    return 'Tu as déjà joué à ce JCQ. Demande ou utilise un replay validé.';
+  }
+  if (message.contains('replay') || message.contains('Replay')) {
+    return 'Ton replay n’est pas encore validé ou a déjà été utilisé.';
+  }
+  if (message.contains('Banque de questions incomplete')) {
+    return 'Ce JCQ n’a pas assez de questions disponibles pour démarrer.';
+  }
+  if (message.contains('Aucune question')) {
+    return 'Aucune question disponible pour ce JCQ.';
+  }
+  return 'Impossible de démarrer ce JCQ pour le moment.';
 }
 
 class _PredictionParticipationSheet extends ConsumerStatefulWidget {

@@ -603,7 +603,9 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
 
   final cacheKey = _contestDetailCacheKey(userId, contestId);
   final cachedDetail = _contestDetailCache[cacheKey];
-  if (cachedDetail != null && !cachedDetail.contest.isLive) {
+  if (cachedDetail != null &&
+      !cachedDetail.contest.isLive &&
+      !cachedDetail.contest.canRequestReplay) {
     authLogResponse('contestDetailCache', {
       'contestId': contestId,
       'hit': true,
@@ -613,7 +615,9 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
     authLogResponse('contestDetailCache', {
       'contestId': contestId,
       'hit': false,
-      'reason': 'live_contest_requires_fresh_state',
+      'reason': cachedDetail.contest.canRequestReplay
+          ? 'replay_contest_requires_fresh_state'
+          : 'live_contest_requires_fresh_state',
     });
   }
 
@@ -758,7 +762,7 @@ final contestDetailProvider = FutureProvider.family<ContestDetailData, String>((
   }
 
   if (contest.canRequestReplay && participation != null) {
-    replayStatus = await fetchQuizReplayStatus(supabase, contestId);
+    replayStatus = await ref.watch(quizReplayStatusProvider(contestId).future);
   }
 
   final detail = ContestDetailData(
